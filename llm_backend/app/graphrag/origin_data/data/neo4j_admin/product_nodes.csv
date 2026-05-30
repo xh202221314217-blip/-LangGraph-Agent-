@@ -1,0 +1,11 @@
+productId:ID(Product),ProductName,SupplierID,CategoryID,QuantityPerUnit,UnitPrice,UnitsInStock,UnitsOnOrder,ReorderLevel,Discontinued,CategoryName,SupplierName,labels:LABEL
+1,博世 智能摄像头 Plus,11,5,1套/箱,3844.31,125,165,87,0,智能摄像头,博世智能系统,Product
+2,格力 智能门铃 Advanced,10,20,5个/套,327.35,869,193,82,0,智能门铃,格力智能电器,Product
+3,格力 智能门铃 Elite,10,20,1台/件,696.98,617,97,14,0,智能门铃,格力智能电器,Product
+4,亚马逊 智能门铃 Advanced,4,20,5个/套,4439.88,402,85,89,0,智能门铃,亚马逊智能科技,Product
+5,松下 智能扫地机器人 Elite,13,7,1套/箱,1952.08,290,84,95,0,智能扫地机器人,松下智能电器,Product
+6,亚马逊 智能空调 Max,4,10,1个/件,6277.89,626,91,35,0,智能空调,亚马逊智能科技,Product
+7,美的 智能门铃 Pro,9,20,2个/包,1117.26,329,84,99,0,智能门铃,美的智能科技,Product
+8,华为 智能灯具 Mini,2,2,1个/盒,9846.41,791,21,36,0,智能灯具,华为智能生活,Product
+9,谷歌 智能体重秤 Ultra,5,12,1台/箱,3775.6,683,16,98,0,智能体重秤,谷歌智能设备,Product
+10,松下 智能窗帘 Mini,13,6,3个/套,1389.49,315,134,27,0,智能窗帘,松下智能电器,Product

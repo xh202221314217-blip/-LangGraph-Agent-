@@ -1,0 +1,4 @@
+employeeId:ID(Employee),LastName,FirstName,Title,TitleOfCourtesy,BirthDate,HireDate,Address,City,Region,PostalCode,Country,HomePhone,Extension,Photo,Notes,ReportsTo,labels:LABEL
+1,李,华,CEO,先生,1973-05-21,2021-12-01,海南省柳州市永川贵阳路E座 479207,桂芳市,云南省,299714,中国,18927169877,901,,公司单位学习简介在线.作者基本问题社会相关技术.北京这是也是其实类型.积分精华解决希望.,,Employee
+2,张,红,市场经理,先生,1995-06-08,2020-01-21,海南省宇县沙市西宁街v座 376683,六盘水县,湖北省,935274,中国,15317506335,304,,点击以及今年然后而且单位.提供因此影响这种可以进入.,1.0,Employee
+3,张,帅,客户经理,教授,1992-12-13,2020-01-26,贵州省凤英市高明郝街c座 411340,哈尔滨县,江西省,405349,中国,18562704471,776,,下载地区电子.类型作为其中.,2.0,Employee
