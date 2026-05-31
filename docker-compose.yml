@@ -27,6 +27,10 @@ services:
 
 volumes:
   neo4j_data:
+    name: deepseek_agent_neo4j_data
   neo4j_logs:
+    name: deepseek_agent_neo4j_logs
   neo4j_import:
+    name: deepseek_agent_neo4j_import
   neo4j_plugins:
+    name: deepseek_agent_neo4j_plugins
