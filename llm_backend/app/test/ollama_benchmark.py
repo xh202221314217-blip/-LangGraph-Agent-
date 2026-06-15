@@ -487,8 +487,8 @@ class OllamaBenchmark:
 
 async def main():
     benchmark = OllamaBenchmark(
-        url="http://192.168.110.131:11434",  # 这里替换成实际的ollama endpoint
-        model="deepseek-r1:1.5b"             # 这里替换成实际要进行测试的模型名称
+        url="http://localhost:11434",  # 这里替换成实际的ollama endpoint
+        model="llama3:latest"             # 这里替换成实际要进行测试的模型名称
     )
     
     try:
@@ -536,10 +536,10 @@ async def main():
 
     finally:
 
-        
+        pass
         # 测试完成后卸载模型
-        async with aiohttp.ClientSession() as session:
-            await benchmark.unload_model(session)
+        #async with aiohttp.ClientSession() as session:
+        #    await benchmark.unload_model(session)
 
         # 测试完成后删除
         # async with aiohttp.ClientSession() as session:

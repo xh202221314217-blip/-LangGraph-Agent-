@@ -11,8 +11,7 @@ from app.lg_agent.lg_prompts import (
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_deepseek import ChatDeepSeek
-from langchain_ollama import ChatOllama
-from app.core.config import settings, ServiceType
+from app.core.config import settings
 from app.core.logger import get_logger
 from typing import cast, Literal, TypedDict, List, Dict, Any
 from langchain_core.messages import BaseMessage
@@ -54,6 +53,16 @@ class AdditionalGuardrailsOutput(BaseModel):
 # 构建日志记录器
 logger = get_logger(service="lg_builder")
 
+def create_deepseek_model(tags: List[str] | None = None):
+    """Create the model used by main LangGraph requests."""
+    logger.info(f"Using DeepSeek model: {settings.DEEPSEEK_MODEL}")
+    return ChatDeepSeek(
+        api_key=settings.DEEPSEEK_API_KEY,
+        model_name=settings.DEEPSEEK_MODEL,
+        temperature=0.7,
+        tags=tags or [],
+    )
+
 async def analyze_and_route_query(
     state: AgentState, *, config: RunnableConfig
 ) -> dict[str, Router]:
@@ -69,13 +78,7 @@ async def analyze_and_route_query(
     Returns:
         dict[str, Router]: A dictionary containing the 'router' key with the classification result (classification type and logic).
     """
-    # 选择模型实例，通过.env文件中的AGENT_SERVICE参数选择
-    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["router"])
-        logger.info(f"Using DeepSeek model: {settings.DEEPSEEK_MODEL}")
-    else:
-        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["router"])
-        logger.info(f"Using Ollama model: {settings.OLLAMA_AGENT_MODEL}")
+    model = create_deepseek_model(tags=["router"])
 
     # 拼接提示模版 + 用户的实时问题（包含历史上下文对话） 
     messages = [
@@ -138,11 +141,7 @@ async def respond_to_general_query(
     """
     logger.info("-----generate general-query response-----")
     
-    # 使用大模型生成回复
-    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["general_query"])
-    else:
-        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["general_query"])
+    model = create_deepseek_model(tags=["general_query"])
     
     system_prompt = GENERAL_QUERY_SYSTEM_PROMPT.format(
         logic=state.router["logic"]
@@ -168,11 +167,7 @@ async def get_additional_info(
     """
     logger.info("------continue to get additional info------")
     
-    # 使用大模型生成回复
-    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["additional_info"])
-    else:
-        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["additional_info"])
+    model = create_deepseek_model(tags=["additional_info"])
 
     # 如果用户的问题是电商相关，但与自己的业务无关，则需要返回"无关问题"
 
@@ -353,10 +348,7 @@ async def create_image_query(
                     # 从lg_prompts导入电商客服模板
                     
                     # 构建回复请求
-                    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-                        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["image_query"])
-                    else:
-                        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["image_query"])
+                    model = create_deepseek_model(tags=["image_query"])
                     # 使用专门的图片查询提示模板
                     system_prompt = GET_IMAGE_SYSTEM_PROMPT.format(
                         image_description=image_description
@@ -399,11 +391,7 @@ async def create_research_plan(
     """
     logger.info("------execute local knowledge base query------")
 
-    # 使用大模型生成查询/多跳、并行查询计划
-    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["research_plan"])
-    else:
-        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["research_plan"])
+    model = create_deepseek_model(tags=["research_plan"])
     
     # 初始化必要参数
     # 1. Neo4j图数据库连接 - 使用配置中的连接信息
@@ -477,10 +465,7 @@ async def check_hallucinations(
     Returns:
         dict[str, Router]: A dictionary containing the 'router' key with the classification result (classification type and logic).
     """
-    if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-        model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["hallucinations"])
-    else:
-        model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["hallucinations"])
+    model = create_deepseek_model(tags=["hallucinations"])
     
     system_prompt = CHECK_HALLUCINATIONS.format(
         documents=state.documents,

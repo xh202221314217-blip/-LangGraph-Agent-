@@ -62,8 +62,10 @@ def create_predefined_cypher_node(
         }
         """
 
-        for key, value in parameters.items():
-            parameters[key] = str(value)
+        parameters = {
+            key.lstrip("$"): str(value)
+            for key, value in parameters.items()
+        }
         
         statement = predefined_cypher_dict.get(params.get("query"))   #这里实际就是工具调用
         """

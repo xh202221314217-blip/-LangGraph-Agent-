@@ -22,6 +22,7 @@ predefined_cypher_dict: Dict[str, str] = {
     # 供应商类查询
     "supplier_by_country": "MATCH (s:Supplier) WHERE s.Country = $country RETURN s.CompanyName, s.ContactName, s.Phone",
     "supplier_products": "MATCH (s:Supplier)<-[:SUPPLIED_BY]-(p:Product) WHERE s.CompanyName = $supplier_name RETURN p.ProductName, p.UnitPrice, p.UnitsInStock",
+    "suppliers_by_category": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category), (p)-[:SUPPLIED_BY]->(s:Supplier) WHERE c.CategoryName = $category_name RETURN DISTINCT s.CompanyName, s.ContactName, s.Phone, collect(p.ProductName) AS Products",
     
     # 类别类查询
     "all_categories": "MATCH (c:Category) RETURN c.CategoryName, c.Description",
@@ -44,5 +45,5 @@ predefined_cypher_dict: Dict[str, str] = {
     # 智能家居相关查询（示例）
     "smart_home_products": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category) WHERE c.CategoryName CONTAINS '智能' RETURN p.ProductName, p.UnitPrice, p.UnitsInStock, c.CategoryName",
     "smart_speakers": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category) WHERE c.CategoryName = '智能音箱' RETURN p.ProductName, p.UnitPrice, p.UnitsInStock",
-    "smart_lighting": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category) WHERE c.CategoryName = '智能照明' RETURN p.ProductName, p.UnitPrice, p.UnitsInStock"
+    "smart_lighting": "MATCH (p:Product)-[:BELONGS_TO]->(c:Category), (p)-[:SUPPLIED_BY]->(s:Supplier) WHERE c.CategoryName = '智能灯具' RETURN DISTINCT s.CompanyName AS SupplierName, s.ContactName AS ContactName, s.Phone AS Phone, collect({name: p.ProductName, price: p.UnitPrice, stock: p.UnitsInStock}) AS Products"
 }

@@ -28,6 +28,7 @@ class predefined_cypher(BaseModel):
     4. 供应商类查询：
        - supplier_by_country: 查询特定国家的供应商
        - supplier_products: 查询特定供应商提供的所有产品
+       - suppliers_by_category: 查询生产或供应某个类别产品的公司
     5. 类别类查询：
        - all_categories: 查询所有产品类别
        - category_products: 查询特定类别下的所有产品
@@ -45,7 +46,7 @@ class predefined_cypher(BaseModel):
     9. 智能家居相关查询：
        - smart_home_products: 查询所有智能家居产品
        - smart_speakers: 查询智能音箱类产品
-       - smart_lighting: 查询智能照明类产品
+       - smart_lighting: 查询智能灯具类产品及其供应公司
     请根据用户的问题选择最合适的查询，并根据需要替换查询中的参数值（如$product_name, $category_name等）。
     """
     query: str = Field(..., description="query the graph must include the question")

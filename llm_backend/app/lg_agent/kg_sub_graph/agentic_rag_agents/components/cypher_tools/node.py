@@ -12,9 +12,8 @@ from app.graphrag.graphrag.utils.storage import load_table_from_storage
 from app.graphrag.graphrag.storage.file_pipeline_storage import FilePipelineStorage
 from app.lg_agent.kg_sub_graph.kg_neo4j_conn import get_neo4j_graph
 from app.core.logger import get_logger
-from langchain_ollama import ChatOllama
 from langchain_deepseek import ChatDeepSeek
-from app.core.config import settings, ServiceType
+from app.core.config import settings
 from app.lg_agent.kg_sub_graph.agentic_rag_agents.retrievers.cypher_examples.northwind_retriever import NorthwindCypherRetriever
 from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.cypher_tools.utils import create_text2cypher_generation_node, create_text2cypher_validation_node, create_text2cypher_execution_node
 
@@ -22,6 +21,15 @@ from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.cypher_tools.utils 
 
 # 获取日志记录器
 logger = get_logger(service="cypher_tools")
+
+def create_deepseek_model(tags: List[str] | None = None):
+    """Create the model used by Text2Cypher requests."""
+    return ChatDeepSeek(
+        api_key=settings.DEEPSEEK_API_KEY,
+        model_name=settings.DEEPSEEK_MODEL,
+        temperature=0.7,
+        tags=tags or [],
+    )
 
 # 定义GraphRAG查询的输入状态类型
 class CypherQueryInputState(BaseModel):
@@ -97,12 +105,7 @@ def create_cypher_query_node(
         if not query:
             errors.append("未提供查询文本")
  
-        # 使用大模型执行查询/多跳/并行查询计划
-        # 1. 根据.env文件中AGENT_SERVICE的设置，选择使用DeepSeek或Ollama启动的模型服务
-        if settings.AGENT_SERVICE == ServiceType.DEEPSEEK:
-            model = ChatDeepSeek(api_key=settings.DEEPSEEK_API_KEY, model_name=settings.DEEPSEEK_MODEL, temperature=0.7, tags=["research_plan"])
-        else:
-            model = ChatOllama(model=settings.OLLAMA_AGENT_MODEL, base_url=settings.OLLAMA_BASE_URL, temperature=0.7, tags=["research_plan"])
+        model = create_deepseek_model(tags=["research_plan"])
 
         # 2. 获取Neo4j图数据库连接
         neo4j_graph = None

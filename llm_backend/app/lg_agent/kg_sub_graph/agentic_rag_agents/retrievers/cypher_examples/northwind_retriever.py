@@ -63,6 +63,12 @@ class NorthwindCypherRetriever(BaseCypherExampleRetriever):
             ],
             "供应商相关": [
                 {
+                    "question": "有哪些公司生产智能灯具？",
+                    "cypher": """MATCH (p:Product)-[:BELONGS_TO]->(c:Category), (p)-[:SUPPLIED_BY]->(s:Supplier)
+    WHERE c.CategoryName = '智能灯具'
+    RETURN DISTINCT s.CompanyName, s.ContactName, s.Phone, collect(p.ProductName) AS Products"""
+                },
+                {
                     "question": "供应商小米智能家居提供了哪些产品？",
                     "cypher": """MATCH (p:Product)-[:SUPPLIED_BY]->(s:Supplier)
     WHERE s.CompanyName = '小米智能家居'

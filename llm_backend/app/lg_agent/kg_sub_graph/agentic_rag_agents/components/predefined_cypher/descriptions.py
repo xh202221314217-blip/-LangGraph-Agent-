@@ -32,6 +32,7 @@ ORDER_QUERY_DESCRIPTIONS = {
 SUPPLIER_QUERY_DESCRIPTIONS = {
     "supplier_by_country": "查询特定国家的所有供应商。适用于用户询问某个国家有哪些供应商。",
     "supplier_products": "查询特定供应商提供的所有产品。适用于用户询问某个供应商提供了哪些产品。",
+    "suppliers_by_category": "查询生产或供应某个产品类别的公司。适用于用户询问哪些公司生产、供应某类产品。",
 }
 
 # 类别类查询描述
@@ -64,7 +65,7 @@ SALES_QUERY_DESCRIPTIONS = {
 SMART_HOME_QUERY_DESCRIPTIONS = {
     "smart_home_products": "查询所有智能家居相关产品。适用于用户询问有哪些智能家居产品。",
     "smart_speakers": "查询所有智能音箱类产品。适用于用户询问有哪些智能音箱或语音助手产品。",
-    "smart_lighting": "查询所有智能照明类产品。适用于用户询问有哪些智能灯或智能照明产品。",
+    "smart_lighting": "查询所有智能灯具类产品及其供应公司。适用于用户询问有哪些智能灯、智能灯具产品，或哪些公司生产/供应智能灯具。",
 }
 
 # 合并所有查询描述
