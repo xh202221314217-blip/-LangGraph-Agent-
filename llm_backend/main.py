@@ -20,7 +20,6 @@ from sqlalchemy import select
 from app.services.conversation_service import ConversationService
 import uuid
 import os
-from app.services.indexing_service import IndexingService
 import sys
 from app.lg_agent.lg_states import AgentState, InputState
 from app.lg_agent.utils import new_uuid
@@ -158,7 +157,11 @@ async def upload_file(
     file: UploadFile = File(...),
     user_id: int = Form(...)
 ):
-    """上传文件并准备 RAG 处理"""
+    """Save an uploaded file.
+
+    GraphRAG and Milvus ingestion are intentionally exposed as CLI operations for
+    the first merged version because indexing can be a long-running task.
+    """
     try:
         logger.info(f"Uploading file for user {user_id}: {file.filename}")
         
@@ -194,12 +197,30 @@ async def upload_file(
             "directory": str(second_level_dir)
         }
         
-        # 4. 处理文件索引
-        indexing_service = IndexingService()
-        index_result = await indexing_service.process_file(file_info)
-        
-        # 合并结果
-        result = {**file_info, "index_result": index_result}
+        result = {
+            **file_info,
+            "ingestion_status": "saved_only",
+            "message": (
+                "文件已保存。第一版知识库入库请使用 GraphRAG/Milvus CLI，"
+                "避免长任务阻塞普通聊天请求。"
+            ),
+            "recommended_commands": {
+                "graphrag_index": (
+                    "PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace "
+                    "--root llm_backend/app/graphrag_workspaces/ragtest "
+                    "--md-dir llm_backend/app/graphrag_workspaces/ragtest/input "
+                    "--method standard --timeout 3600"
+                ),
+                "graphrag_query_smoke": (
+                    "PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke "
+                    "--method local --query \"GAAFET 相比 FinFET 的关键优势是什么？\" --timeout 180"
+                ),
+                "milvus_ingest": (
+                    "PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus "
+                    "--md-dir llm_backend/app/graphrag_workspaces/ragtest/input --batch-size 20"
+                ),
+            },
+        }
         
         return result
         

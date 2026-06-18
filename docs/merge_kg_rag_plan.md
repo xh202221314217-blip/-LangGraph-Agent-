@@ -217,14 +217,21 @@ GraphRAG CLI 输出处理建议：
   - 已在 `AgentState` 中新增 `documents` 字段，用于保存融合后的检索上下文。
   - 已验证 GraphRAG CLI 可返回结果，Milvus retriever 可返回文档块证据，融合上下文同时包含两侧结果。
   - 单侧失败会降级为另一侧结果，并在融合上下文和日志中记录失败来源。
+- 已完成阶段 6 入库接口或命令：
+  - 第一版入库入口决策为 CLI 优先，不通过 FastAPI 上传接口执行长时间 index。
+  - 已新增 GraphRAG workspace index CLI：`python -m app.graphrag_cli.index_workspace`。
+  - 已保留 GraphRAG query smoke CLI：`python -m app.graphrag_cli.smoke`。
+  - 已保留 Milvus Markdown directory ingest CLI：`python -m app.rag_ingest.write_milvus`。
+  - `/api/upload` 现在只保存上传文件并返回结构化的推荐入库命令，不再调用旧 GraphRAG API 入库路径。
+  - `IndexingService._get_config_file()` 的 `self.config_mapping` 未定义风险已修复为默认空映射。
 
 未完成：
 
-- 尚未进行端到端入库与查询验证。
+- 尚未进行阶段 7 端到端入库、FastAPI LangGraph 查询和前端页面验证。
 
 已知问题：
 
-- `llm_backend/app/services/indexing_service.py` 中 `_get_config_file()` 引用了未定义的 `self.config_mapping`。在修复或替换前，不要依赖当前 `/api/upload` 的 GraphRAG 入库路径。
+- 旧 `IndexingService` 文件仍存在，但第一版 active `/api/upload` 不再调用它执行 GraphRAG 入库；入库请使用阶段 6 记录的 CLI。
 - 原 Neo4j KG 子图仍存在于代码中，但不应作为第一版合并主线。
 - `rag_project/RAG_PROJECT/RAG_PROJECT/documents/milvus_db.py` 使用顶层导入 `from documents...`、`from llm_models...`、`from utils...`。从 `/home/aetherlens/projects/rag_project` 直接执行验收命令时，`RAG_PROJECT/RAG_PROJECT` 未在 `sys.path` 中，会触发 `ModuleNotFoundError: No module named 'documents'`。
 - 给 `PYTHONPATH` 加上 `/home/aetherlens/projects/rag_project/RAG_PROJECT/RAG_PROJECT` 后，导入会继续加载 `BAAI/bge-large-zh-v1.5`。当前环境设置了 `HF_ENDPOINT=https://hf-mirror.com`，该镜像请求失败且本地无模型缓存，最终报错为无法连接镜像并找不到缓存文件。官方 `https://huggingface.co` 在本机可达。
@@ -995,6 +1002,144 @@ PY
 - 如果通过 FastAPI 暴露，长任务不会阻塞普通聊天请求。
 - `self.config_mapping` 未定义问题被修复，或该旧路径不再是 active path。
 - 入库错误以结构化形式返回或清晰记录到日志。
+
+### 阶段执行记录：阶段 6 入库接口或命令
+
+执行时间：2026-06-18。
+
+决策：
+
+- 第一版入库入口采用 CLI 优先。
+- FastAPI `/api/upload` 保留为文件保存入口，但不再触发 GraphRAG index 或 Milvus ingest。
+- 原因：GraphRAG index 和 Milvus ingest 都可能是长任务，第一版不让它们阻塞普通聊天请求；后续如需 Web 管理入口，应加后台任务队列和状态查询接口。
+
+新增文件：
+
+- `llm_backend/app/graphrag_cli/indexer.py`
+- `llm_backend/app/graphrag_cli/index_workspace.py`
+
+修改文件：
+
+- `llm_backend/app/graphrag_cli/__init__.py`
+- `llm_backend/app/services/indexing_service.py`
+- `llm_backend/main.py`
+- `docs/merge_kg_rag_plan.md`
+
+实现内容：
+
+- 新增 `GraphRAGCLIIndexer`，通过 `asyncio.create_subprocess_exec` 调用 `graphrag index`。
+- 新增 `GraphRAGIndexResult`，结构化返回 `root`、`method`、`output`、`stdout`、`stderr`、`returncode`、耗时和实际命令。
+- 新增 `prepare_workspace_input()`，可将 Markdown 目录复制到 GraphRAG workspace 的 `input` 目录。
+- 新增 CLI：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace \
+  --root llm_backend/app/graphrag_workspaces/ragtest \
+  --md-dir /home/aetherlens/projects/rag_project/md/md \
+  --limit 5 \
+  --clear-input \
+  --method standard \
+  --timeout 3600
+```
+
+- GraphRAG query smoke CLI：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --timeout 180
+```
+
+- Milvus Markdown directory ingest CLI：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus \
+  --md-dir llm_backend/app/graphrag_workspaces/ragtest/input \
+  --batch-size 20 \
+  --skip-semantic-chunking
+```
+
+- Milvus query smoke CLI：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_retrieval.smoke \
+  --query "蚀刻技术有哪些分类？" \
+  --top-k 4 \
+  --filter-category ""
+```
+
+`/api/upload` 调整：
+
+- 上传文件仍保存到 `uploads/<user_uuid>/<timestamp>/`。
+- 返回结构新增：
+  - `ingestion_status: "saved_only"`
+  - `message`
+  - `recommended_commands.graphrag_index`
+  - `recommended_commands.graphrag_query_smoke`
+  - `recommended_commands.milvus_ingest`
+- `/api/upload` 不再实例化或调用 `IndexingService.process_file()`，因此旧 GraphRAG API 入库路径不再是 active path。
+- `IndexingService.__init__()` 已补充 `self.config_mapping = {}`，即使后续直接调用 `_get_config_file()`，也会回退到 `settings.yaml`，不会再触发未定义属性错误。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m compileall -q \
+  llm_backend/main.py \
+  llm_backend/app/graphrag_cli \
+  llm_backend/app/services/indexing_service.py
+```
+
+结果：成功。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace --help
+```
+
+结果：成功打印 `--root`、`--md-dir`、`--limit`、`--clear-input`、`--method standard|fast`、`--output`、`--timeout`。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus --help
+```
+
+结果：成功打印 `--md-dir`、`--batch-size`、`--limit`、`--drop-existing`、`--skip-semantic-chunking`。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend:. .venv/bin/python - <<'PY'
+from app.services.indexing_service import IndexingService
+import llm_backend.main as main
+print(IndexingService()._get_config_file('text/markdown'))
+print(main.app.title)
+PY
+```
+
+结果：成功，输出 `settings.yaml` 和 `AssistGen REST API`。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --timeout 180
+```
+
+结果：成功，`returncode=0`，耗时约 `106.01` 秒。回答摘要：GAAFET 相比 FinFET 的关键优势包括 360 度全周向栅极控制、短沟道效应和 DIBL 抑制增强、亚阈值摆幅更接近理论极限、多纳米片堆叠带来更高沟道设计自由度、相同功耗下性能提升或相同性能下降低功耗，以及与 EUV、选择性外延生长、内间隔层等先进工艺模块兼容。
+
+阶段 6 结论：
+
+- 验收通过。
+- 用户可以通过文档化 CLI 启动 GraphRAG index、GraphRAG query smoke、Milvus 入库和 Milvus 检索 smoke。
+- FastAPI 上传接口不再触发旧入库逻辑，避免长任务阻塞普通聊天请求。
+- 入库错误由 CLI wrapper 抛出结构化异常，并在 CLI 输出中显示 GraphRAG/Milvus 原始错误信息。
+- 阶段 7 可以开始做真实 Markdown 小样本的完整端到端验证。
 
 ### 阶段 7：端到端验证
 
