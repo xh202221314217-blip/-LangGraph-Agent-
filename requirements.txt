@@ -31,6 +31,11 @@ langchain_neo4j==0.4.0
 matplotlib==3.10.1
 seaborn==0.13.2
 langchain_community==0.3.21
+langchain-experimental>=0.3.4,<0.4.0
+langchain-huggingface>=0.1.2,<1.0.0
+langchain-milvus>=0.1.8,<0.2.0
+pymilvus>=2.5.0,<2.6.0
+unstructured[md]>=0.15.0,<0.16.0
 graphrag==2.1.0
 langgraph-checkpoint-sqlite==2.0.6
 ipython==9.1.0

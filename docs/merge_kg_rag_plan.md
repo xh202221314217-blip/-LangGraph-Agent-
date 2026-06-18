@@ -198,10 +198,15 @@ GraphRAG CLI 输出处理建议：
   - 已实现环境变量可配置的 CLI wrapper。
   - 已实现异步 `graphrag query` 调用、stdout/stderr/return code 捕获、timeout 和最小 stdout 清洗。
   - 已新增可重复运行的 smoke 命令。
+- 已完成阶段 3 Milvus 传统 RAG 入库/检索迁移：
+  - 已新增 `llm_backend/app/rag_ingest` 和 `llm_backend/app/rag_retrieval` 包。
+  - 已迁移 Markdown 解析、语义切分入口、Milvus dense+sparse schema、BM25 Function、HNSW/dense 与 sparse inverted index。
+  - 已新增 Markdown 目录入库 CLI 和 Milvus hybrid retriever。
+  - 已通过独立 smoke collection 验证：创建 collection、导入 5 条文档、关键词检索返回 4 条 LangChain `Document`。
+  - 迁移后的运行时不依赖 `/home/aetherlens/projects/rag_project` 源码导入。
 
 未完成：
 
-- 尚未将 `rag_project` 的 Milvus 入库/检索代码迁移到 `deepseek_agent`。
 - 尚未重写 router、tool selection、guardrails 等提示词。
 - 尚未进行端到端入库与查询验证。
 
@@ -213,6 +218,8 @@ GraphRAG CLI 输出处理建议：
 - 给 `PYTHONPATH` 加上 `/home/aetherlens/projects/rag_project/RAG_PROJECT/RAG_PROJECT` 后，导入会继续加载 `BAAI/bge-large-zh-v1.5`。当前环境设置了 `HF_ENDPOINT=https://hf-mirror.com`，该镜像请求失败且本地无模型缓存，最终报错为无法连接镜像并找不到缓存文件。官方 `https://huggingface.co` 在本机可达。
 - DeepSeek API 当前不能支持 GraphRAG index 所需的完整调用链路；GraphRAG index/query workspace 配置应使用百炼 OpenAI-compatible 接口。运行时普通聊天、总结和融合回答可优先使用 DeepSeek。
 - 百炼 `text-embedding-v3` embedding 接口每批 input 不能超过 10；GraphRAG 默认 `embed_text.batch_size=16` 会失败，`ragtest/settings.yaml` 已设置为 `embed_text.batch_size=8`。
+- `unstructured` Markdown parser 在当前环境会尝试下载 NLTK 数据，下载地址返回 `HTTP Error 403: Forbidden`。迁移后的 `MarkdownParser` 已增加纯 Markdown 文本兜底解析，优先使用 `unstructured`，失败时按 Markdown 标题段落切分。
+- 当前 `llm_backend/.env` 未配置 `RAG_OPENAI_EMBEDDING_API_KEY` 或 `OPENAI_API_KEY`，因此生产路径如选择 `RAG_EMBEDDING_PROVIDER=openai` 需要补充 key；默认 HuggingFace embedding 仍可能受 `HF_ENDPOINT` 和模型缓存影响。
 
 ## 8. 执行原则
 
@@ -610,6 +617,106 @@ PY
 - retriever 返回 LangChain `Document` 或明确记录的内部结果类型。
 - 迁移完成后，运行时不依赖 `/home/aetherlens/projects/rag_project` 的源码导入。
 
+### 阶段执行记录：阶段 3 Milvus 传统 RAG 入库
+
+执行时间：2026-06-18。
+
+新增文件：
+
+- `llm_backend/app/rag_ingest/__init__.py`
+- `llm_backend/app/rag_ingest/markdown_parser.py`
+- `llm_backend/app/rag_ingest/milvus_store.py`
+- `llm_backend/app/rag_ingest/write_milvus.py`
+- `llm_backend/app/rag_retrieval/__init__.py`
+- `llm_backend/app/rag_retrieval/milvus_retriever.py`
+- `llm_backend/app/rag_retrieval/smoke.py`
+
+修改文件：
+
+- `llm_backend/app/core/config.py`
+- `requirements.txt`
+
+实现内容：
+
+- `MarkdownParser` 迁移了 `unstructured` elements 解析、标题/正文合并和可选 `SemanticChunker` 语义切分。
+- `MarkdownParser` 增加纯 Markdown 兜底解析器；当前环境中 `unstructured` 下载 NLTK 数据失败时，会按 Markdown 标题段落切分。
+- `MilvusVectorStore` 可创建 dense+sparse hybrid collection，默认 `drop_existing=False`，不会删除已有 collection。
+- Milvus schema 保留 `text`、`category`、`source`、`filename`、`filetype`、`title`、`category_depth`、`sparse`、`dense` 字段。
+- `text` 字段启用 jieba analyzer，`sparse` 通过 Milvus BM25 Function 生成。
+- `sparse` 使用 `SPARSE_INVERTED_INDEX` + `BM25`；`dense` 使用 `HNSW` + `IP`。
+- dense embedding 延迟创建，支持 `RAG_EMBEDDING_PROVIDER=huggingface|openai`。
+- `write_milvus.py` 提供 Markdown 目录入库 CLI，支持 `--md-dir`、`--batch-size`、`--limit`、`--drop-existing`、`--skip-semantic-chunking`。
+- `MilvusHybridRetriever` 返回 LangChain `Document`，保留 RRF 风格 `ranker_type="rrf"` 和 `ranker_params={"k": ...}`。
+
+依赖调整：
+
+- 新增并约束到当前 LangChain 0.3 兼容线：
+  - `langchain-experimental>=0.3.4,<0.4.0`
+  - `langchain-huggingface>=0.1.2,<1.0.0`
+  - `langchain-milvus>=0.1.8,<0.2.0`
+  - `pymilvus>=2.5.0,<2.6.0`
+  - `unstructured[md]>=0.15.0,<0.16.0`
+- 当前 `.venv` 已同步安装并通过 `pip check`。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m compileall -q \
+  llm_backend/app/rag_ingest \
+  llm_backend/app/rag_retrieval \
+  llm_backend/app/core/config.py
+```
+
+结果：成功。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus --help
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_retrieval.smoke --help
+```
+
+结果：两个 CLI 均可打印帮助信息。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/pip check
+```
+
+结果：`No broken requirements found.`。
+
+Milvus schema 验证：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.rag_ingest import MilvusVectorStore
+MilvusVectorStore().create_collection()
+PY
+```
+
+结果：成功创建或复用默认 `t_collection01`，未传 `drop_existing=True`，因此不会删除已有 collection。后续用 `MilvusClient.list_collections()` 确认存在 `t_collection01`，并确认索引包含 `sparse_inverted_index` 和 `dense_inverted_index`。
+
+最小入库/检索 smoke：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+# 使用测试用固定 1024 维 embedding，避免依赖外部 API 或 HuggingFace 模型下载。
+# collection: codex_stage3_smoke
+# source: llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_kvtvbuvp.md
+PY
+```
+
+结果：成功。实际执行结果为 `inserted=5`、`results=4`，返回类型为 LangChain `Document`。前两条结果来自 `tech_report_kvtvbuvp.md`，标题分别为“利用蚀刻技术实现纳米级电路图案的方法”和“蚀刻技术的基本原理与分类”。
+
+阶段 3 结论：
+
+- 验收通过。
+- Milvus collection 创建、Markdown 小样本导入、关键词检索和 Document 返回类型均已验证。
+- 生产 embedding 仍需要后续根据部署环境选择并配置：HuggingFace 本地模型缓存，或 `RAG_EMBEDDING_PROVIDER=openai` 搭配 `RAG_OPENAI_EMBEDDING_API_KEY`/`OPENAI_API_KEY`。
+- 阶段 4 可以开始重写 router、tool selection 和 guardrails 提示词。
+
 ### 阶段 4：重写提示词与路由
 
 目标：
@@ -808,13 +915,24 @@ PY
 - `OPENAI_API_KEY`：OpenAI-compatible API key，当前 embedding 代码用于百炼兼容接口。
 - `TAVILY_API_KEY`：Tavily 搜索 key，仅 web search fallback 需要。
 
-Milvus embedding 代码中还有硬编码配置，后续迁移时应改为环境变量或 `deepseek_agent` 配置项：
+阶段 3 已迁移到 `deepseek_agent` 的 Milvus/RAG 配置变量：
 
-- `openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1"`。
-- `model_name="BAAI/bge-large-zh-v1.5"`。
-- `model_kwargs={"device": "cuda"}`。
-- `encode_kwargs={"normalize_embeddings": True}`。
-- Milvus dense 向量维度当前 schema 写死为 `1024`。
+- `MILVUS_URI`：Milvus 服务地址，默认 `http://localhost:19530`。
+- `MILVUS_COLLECTION_NAME`：Milvus collection 名，默认 `t_collection01`。
+- `MILVUS_DENSE_DIMENSION`：dense 向量维度，默认 `1024`。
+- `MILVUS_TEXT_MAX_LENGTH`：Milvus `text` 字段最大长度，默认 `6000`。
+- `MILVUS_CONSISTENCY_LEVEL`：Milvus 一致性级别，默认 `Strong`。
+- `MILVUS_SEARCH_TOP_K`：Milvus retriever 默认返回数量，默认 `4`。
+- `MILVUS_SEARCH_SCORE_THRESHOLD`：Milvus retriever 分数阈值，默认 `0.0`。RRF 分数通常较小，不建议第一版设为 `0.1`。
+- `MILVUS_RRF_K`：RRF ranker 参数，默认 `100`。
+- `MILVUS_FILTER_CATEGORY`：默认检索过滤类别，默认 `content`。
+- `RAG_EMBEDDING_PROVIDER`：Milvus dense embedding provider，支持 `huggingface` 或 `openai`，默认 `huggingface`。
+- `RAG_EMBEDDING_MODEL`：HuggingFace embedding 模型名，默认 `BAAI/bge-large-zh-v1.5`。
+- `RAG_EMBEDDING_DEVICE`：HuggingFace embedding 运行设备，默认 `cpu`。
+- `RAG_EMBEDDING_NORMALIZE`：是否归一化 HuggingFace embedding，默认 `True`。
+- `RAG_OPENAI_EMBEDDING_API_KEY`：OpenAI-compatible embedding API key。
+- `RAG_OPENAI_EMBEDDING_BASE_URL`：OpenAI-compatible embedding base URL，默认百炼 endpoint。
+- `RAG_OPENAI_EMBEDDING_MODEL`：OpenAI-compatible embedding 模型，默认 `text-embedding-v3`。
 
 当前 shell 额外影响变量：
 
@@ -887,6 +1005,6 @@ Neo4j 变量不是第一版必需项，但当前旧代码和 `.env` 仍包含：
 
 ## 15. 下一步
 
-下一位模型应从阶段 0：基线验证开始。
+下一位模型应从阶段 4：重写提示词与路由开始。
 
-当前只完成了调研和本文档改写，尚未开始合并实现。
+阶段 0、1、2、3 已通过各自验收。不要启动阶段 5，除非阶段 4 已完成并记录路由/prompt 验收结果。

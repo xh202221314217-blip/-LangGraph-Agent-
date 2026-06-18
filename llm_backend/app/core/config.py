@@ -66,6 +66,28 @@ class Settings(BaseSettings):
     EMBEDDING_TYPE: str = "ollama"  # ollama 或 sentence_transformer
     EMBEDDING_MODEL: str = "bge-m3"  # ollama embedding模型
     EMBEDDING_THRESHOLD: float = 0.90  # 语义相似度阈值
+
+    # Milvus hybrid RAG settings
+    MILVUS_URI: str = "http://localhost:19530"
+    MILVUS_COLLECTION_NAME: str = "t_collection01"
+    MILVUS_DENSE_DIMENSION: int = 1024
+    MILVUS_TEXT_MAX_LENGTH: int = 6000
+    MILVUS_CONSISTENCY_LEVEL: str = "Strong"
+    MILVUS_SEARCH_TOP_K: int = 4
+    MILVUS_SEARCH_SCORE_THRESHOLD: float = 0.0
+    MILVUS_RRF_K: int = 100
+    MILVUS_FILTER_CATEGORY: str = "content"
+
+    # Embedding settings for Milvus dense vectors.
+    # Keep this separate from the app-wide EMBEDDING_* settings so the
+    # legacy chat/cache embedding path is not changed by the migration.
+    RAG_EMBEDDING_PROVIDER: str = "huggingface"  # huggingface 或 openai
+    RAG_EMBEDDING_MODEL: str = "BAAI/bge-large-zh-v1.5"
+    RAG_EMBEDDING_DEVICE: str = "cpu"
+    RAG_EMBEDDING_NORMALIZE: bool = True
+    RAG_OPENAI_EMBEDDING_API_KEY: str = ""
+    RAG_OPENAI_EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    RAG_OPENAI_EMBEDDING_MODEL: str = "text-embedding-v3"
     
     # GraphRAG settings
     GRAPHRAG_PROJECT_DIR: str = "llm_backend/app/graphrag"  # GraphRAG项目目录
@@ -95,4 +117,4 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
         case_sensitive = True
 
-settings = Settings() 
+settings = Settings()
