@@ -141,6 +141,7 @@ def prepare_workspace_input(
     copied: list[Path] = []
     for source in files:
         destination = input_dir / source.name
-        shutil.copy2(source, destination)
+        if source.resolve() != destination.resolve():
+            shutil.copy2(source, destination)
         copied.append(destination)
     return copied

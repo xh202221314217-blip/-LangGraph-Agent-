@@ -50,6 +50,8 @@ def create_embedding_function(provider: Optional[str] = None):
             model=settings.RAG_OPENAI_EMBEDDING_MODEL,
             api_key=api_key,
             base_url=settings.RAG_OPENAI_EMBEDDING_BASE_URL,
+            chunk_size=settings.EMBEDDING_BATCH_SIZE,
+            check_embedding_ctx_length=False,
         )
 
     raise ValueError(f"Unsupported RAG_EMBEDDING_PROVIDER: {provider}")

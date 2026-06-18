@@ -224,10 +224,19 @@ GraphRAG CLI 输出处理建议：
   - 已保留 Milvus Markdown directory ingest CLI：`python -m app.rag_ingest.write_milvus`。
   - `/api/upload` 现在只保存上传文件并返回结构化的推荐入库命令，不再调用旧 GraphRAG API 入库路径。
   - `IndexingService._get_config_file()` 的 `self.config_mapping` 未定义风险已修复为默认空映射。
+- 已完成阶段 7 端到端验证：
+  - 已使用 5 个 Markdown 样本重新完成 GraphRAG `standard` index。
+  - 已验证 GraphRAG CLI `local` query 可返回有效回答。
+  - 已重新导入 Milvus collection，5 个 Markdown 生成 36 条文档块。
+  - 已验证 Milvus hybrid 检索返回相关文档块。
+  - 已通过 FastAPI `/api/langgraph/query` 对 3 个 Markdown 语料问题返回 SSE 融合回答。
+  - 已验证 general chat 仍可用。
+  - 已验证前端静态入口、JS、CSS 可访问，前端包调用 `/api/langgraph/query`。
+  - 已修复阶段 7 暴露的 GraphRAG workspace input 同源复制错误和百炼 embedding 兼容问题。
 
 未完成：
 
-- 尚未进行阶段 7 端到端入库、FastAPI LangGraph 查询和前端页面验证。
+- 尚未进行阶段 8 清理与文档完善。
 
 已知问题：
 
@@ -238,8 +247,9 @@ GraphRAG CLI 输出处理建议：
 - DeepSeek API 当前不能支持 GraphRAG index 所需的完整调用链路；GraphRAG index/query workspace 配置应使用百炼 OpenAI-compatible 接口。运行时普通聊天、总结和融合回答可优先使用 DeepSeek。
 - 百炼 `text-embedding-v3` embedding 接口每批 input 不能超过 10；GraphRAG 默认 `embed_text.batch_size=16` 会失败，`ragtest/settings.yaml` 已设置为 `embed_text.batch_size=8`。
 - `unstructured` Markdown parser 在当前环境会尝试下载 NLTK 数据，下载地址返回 `HTTP Error 403: Forbidden`。迁移后的 `MarkdownParser` 已增加纯 Markdown 文本兜底解析，优先使用 `unstructured`，失败时按 Markdown 标题段落切分。
-- 当前 `llm_backend/.env` 未配置 `RAG_OPENAI_EMBEDDING_API_KEY` 或 `OPENAI_API_KEY`，因此生产路径如选择 `RAG_EMBEDDING_PROVIDER=openai` 需要补充 key；默认 HuggingFace embedding 仍可能受 `HF_ENDPOINT` 和模型缓存影响。
-- 阶段 5 生产默认 Milvus 检索路径仍会使用 `RAG_EMBEDDING_PROVIDER=huggingface`，当前环境因 `HF_ENDPOINT=https://hf-mirror.com` 且无本地模型缓存，默认 collection 检索会在 embedding 初始化时失败。融合层已能降级到 GraphRAG；生产要启用 Milvus 默认链路，需要缓存 `BAAI/bge-large-zh-v1.5`、修正 `HF_ENDPOINT`，或配置 `RAG_EMBEDDING_PROVIDER=openai` 与有效 embedding key。
+- 当前环境已配置 `RAG_EMBEDDING_PROVIDER=openai` 和百炼 embedding key；如果后续切回 `huggingface`，仍可能受 `HF_ENDPOINT` 和 `BAAI/bge-large-zh-v1.5` 本地缓存影响。
+- 前端静态包可调用新 `/api/langgraph/query`，但 UI 文案和页面内容仍保留旧电商客服/商品展示元素；阶段 8 应清理或替换该静态前端。
+- GraphRAG `standard` index 在阶段 7 小样本上耗时约 1963 秒；后续如频繁重建，应评估减少社区报告生成量、使用 `fast` method 或改为增量更新。
 
 ## 8. 执行原则
 
@@ -1166,6 +1176,143 @@ PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
 - Markdown 知识库问题不会出现旧电商业务回答。
 - 本文档记录最终验证命令、结果和残余问题。
 
+### 阶段执行记录：阶段 7 端到端验证
+
+执行时间：2026-06-18。
+
+样本语料：
+
+- `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_hwbh0qqf.md`
+- `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_kvtvbuvp.md`
+- `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_lnwngbun.md`
+- `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_m7we5422.md`
+- `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_vebl21yh.md`
+
+GraphRAG index 命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace \
+  --root llm_backend/app/graphrag_workspaces/ragtest \
+  --md-dir llm_backend/app/graphrag_workspaces/ragtest/input \
+  --method standard \
+  --timeout 3600
+```
+
+结果：成功，`returncode=0`，耗时约 `1963.12` 秒，日志包含 `All workflows completed successfully`。
+
+本阶段修复：
+
+- `prepare_workspace_input()` 在 `--md-dir` 等于 workspace `input` 时会复制自身并触发 `SameFileError`。已改为同源文件跳过复制但计入已准备文件。
+- Milvus 入库使用百炼 OpenAI-compatible embedding 时，`langchain_openai.OpenAIEmbeddings` 默认会向兼容接口发送 tokenized input，百炼返回 `contents is neither str nor list of str`。已设置 `check_embedding_ctx_length=False`，并设置 `chunk_size=settings.EMBEDDING_BATCH_SIZE`。
+
+GraphRAG parquet 检查：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+import pandas as pd
+from pathlib import Path
+root = Path("llm_backend/app/graphrag_workspaces/ragtest/output")
+for name in ["entities", "relationships", "text_units", "documents", "communities", "community_reports"]:
+    df = pd.read_parquet(root / f"{name}.parquet")
+    print(f"{name}: rows={len(df)} cols={len(df.columns)}")
+PY
+```
+
+结果：
+
+- `entities`: 185 行。
+- `relationships`: 218 行。
+- `text_units`: 12 行。
+- `documents`: 5 行。
+- `communities`: 42 行。
+- `community_reports`: 42 行。
+
+GraphRAG CLI query 命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --timeout 240
+```
+
+结果：成功，`returncode=0`，耗时约 `61.96` 秒。回答摘要：GAAFET 通过 360 度全环绕沟道提升栅极控制能力，静电控制效率比 FinFET 提升 40% 以上；纳米线/纳米片结构提供更高沟道设计自由度；在相同功耗下性能提升或相同性能下降低功耗；适合 3nm 及以下先进节点。
+
+Milvus 入库命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus \
+  --md-dir llm_backend/app/graphrag_workspaces/ragtest/input \
+  --batch-size 8 \
+  --drop-existing \
+  --skip-semantic-chunking
+```
+
+结果：成功，5 个 Markdown 文件导入为 36 条文档块。`unstructured` 仍因 NLTK 下载 `HTTP Error 403: Forbidden` 走纯 Markdown fallback，但不影响入库。
+
+Milvus hybrid 检索命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_retrieval.smoke \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --top-k 4
+```
+
+结果：成功，返回 4 条相关文档块，前 3 条分别来自 `GAAFET与传统器件的关键差异`、`全环绕栅极晶体管的基本原理与结构`、`传统平面晶体管与FinFET的局限性`。
+
+FastAPI 启动与健康检查：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+curl -sS -i http://127.0.0.1:8000/health
+curl -sS -i http://127.0.0.1:8000/
+```
+
+结果：`/health` 返回 `{"status":"ok"}`；`/` 返回 `200 OK` 和 `llm_backend/static/dist/index.html`。
+
+FastAPI LangGraph SSE 验证命令示例：
+
+```bash
+curl -sS -N -D /tmp/kg1.headers -o /tmp/kg1.sse \
+  -X POST http://127.0.0.1:8000/api/langgraph/query \
+  -F "query=请基于知识库说明 GAAFET 相比 FinFET 的关键优势是什么？" \
+  -F "user_id=1"
+```
+
+已验证 3 个 Markdown 语料问题：
+
+- `GAAFET 相比 FinFET 的关键优势是什么？`：成功，HTTP 200，耗时约 85 秒，回答包含 360 度全环绕控制、静电控制效率、纳米片堆叠等知识库内容，并带 `[M1]` 等证据引用。
+- `氮化镓材料在功率半导体领域的主要优势`：成功，HTTP 200，耗时约 90 秒，回答包含宽带隙、高耐压、低开关损耗、高频运行、小型化等内容。
+- `PECVD 制备高质量氮化硅薄膜的关键过程和评估指标`：成功，HTTP 200，耗时约 114 秒，回答包含前体气体选择、等离子体反应、基底沉积、薄膜特性评估等内容。
+
+general chat 验证：
+
+```bash
+curl -sS -N -D /tmp/general.headers -o /tmp/general.sse \
+  -X POST http://127.0.0.1:8000/api/langgraph/query \
+  -F "query=请用一句话解释什么是递归。" \
+  -F "user_id=1"
+```
+
+结果：成功，HTTP 200，耗时约 2 秒，返回“递归是一种函数或过程直接或间接调用自身的编程技巧。”
+
+旧业务污染检查：
+
+- 对 3 个知识库 SSE 输出和 1 个 general SSE 输出重组正文后检查 `订单`、`商品`、`客户`、`供应商`、`购物车`、`电商` 等词，结果均未命中。
+- 注意：前端静态包本身仍保留旧电商页面文案和商品展示元素，但其聊天调用目标已是 `/api/langgraph/query`。该 UI 清理属于阶段 8。
+
+阶段 7 结论：
+
+- 验收通过。
+- GraphRAG CLI、Milvus hybrid RAG、融合回答、FastAPI SSE、general chat 和静态前端可访问性均已验证。
+- 后续进入阶段 8：清理旧路径、更新 README、替换旧前端电商文案、整理依赖与 smoke 文档。
+
 ### 阶段 8：清理与文档完善
 
 目标：
@@ -1353,9 +1500,9 @@ Neo4j 变量不是第一版必需项，但当前旧代码和 `.env` 仍包含：
 
 ## 15. 下一步
 
-下一位模型应从阶段 4：重写提示词与路由开始。
+下一位模型应从阶段 8：清理与文档完善开始。
 
-阶段 0、1、2、3 已通过各自验收。不要启动阶段 5，除非阶段 4 已完成并记录路由/prompt 验收结果。
+阶段 0、1、2、3、4、5、6、7 已通过各自验收。阶段 8 重点是更新 README、隔离或标记旧电商 KG/Neo4j 模块、清理前端旧电商文案、整理依赖和补充可重复运行的 smoke 文档。
 
 ## 16. 阶段 5 后配置调整：百炼 embedding 优先
 
