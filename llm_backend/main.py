@@ -37,7 +37,7 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 logger = get_logger(service="main")
 
 # 创建 FastAPI 应用实例
-app = FastAPI(title="AssistGen REST API")
+app = FastAPI(title="Markdown Knowledge RAG API")
 
 # 添加日志中间件， 使用 LoggingMiddleware 来统一处理日志记录，从而替代 FastAPI 的原生打印日志。
 app.add_middleware(LoggingMiddleware)
@@ -230,21 +230,21 @@ async def upload_file(
 
 @app.post("/chat-rag")
 async def rag_chat_endpoint(request: RAGChatRequest):
-    """基于文档的问答接口"""
-    try:
-        logger.info(f"Processing RAG chat request for user {request.user_id}")
-        rag_chat_service = RAGChatService()
-        
-        return StreamingResponse(
-            rag_chat_service.generate_stream(
-                request.messages,
-                request.index_id
-            ),
-            media_type="text/event-stream"
-        )
-    except Exception as e:
-        logger.error(f"RAG chat error for user {request.user_id}: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Deprecated RAG endpoint.
+
+    The merged Markdown knowledge path is served by /api/langgraph/query.
+    """
+    logger.warning(
+        f"Deprecated /chat-rag endpoint called for user={request.user_id} "
+        f"index_id={request.index_id}"
+    )
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "The /chat-rag endpoint is deprecated. Use /api/langgraph/query, "
+            "which routes to the GraphRAG CLI + Milvus hybrid RAG path."
+        ),
+    )
 
 @app.post("/api/conversations")
 async def create_conversation(request: CreateConversationRequest):

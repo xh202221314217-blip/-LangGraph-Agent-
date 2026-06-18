@@ -233,10 +233,19 @@ GraphRAG CLI 输出处理建议：
   - 已验证 general chat 仍可用。
   - 已验证前端静态入口、JS、CSS 可访问，前端包调用 `/api/langgraph/query`。
   - 已修复阶段 7 暴露的 GraphRAG workspace input 同源复制错误和百炼 embedding 兼容问题。
+- 已完成阶段 8 清理与文档完善：
+  - 已重写 README，覆盖环境、依赖、启动、GraphRAG index/query、Milvus 入库、FastAPI 查询和依赖差异说明。
+  - 已新增 `llm_backend/.env.example`。
+  - 已替换静态前端为 Markdown 技术文档知识库问答界面，直接调用 `/api/langgraph/query`。
+  - 已删除旧静态 bundle 中的电商客服/商品展示文案。
+  - 已将 `/chat-rag` 废弃接口改为 HTTP 410 迁移提示，不再引用未定义的 `RAGChatService`。
+  - 已新增 `llm_backend/app/smoke/merged_rag_smoke.py` 作为可重复运行的本地 smoke script。
+  - 已在 `llm_backend/app/lg_agent/kg_sub_graph/README.md` 明确标记旧 Neo4j KG 模块为 legacy reference。
+  - 已在 `requirements.txt` 标记 active RAG 依赖与 legacy Neo4j 依赖边界。
 
 未完成：
 
-- 尚未进行阶段 8 清理与文档完善。
+- 第一版合并计划已完成。后续工作属于增强项或生产化加固。
 
 已知问题：
 
@@ -248,7 +257,7 @@ GraphRAG CLI 输出处理建议：
 - 百炼 `text-embedding-v3` embedding 接口每批 input 不能超过 10；GraphRAG 默认 `embed_text.batch_size=16` 会失败，`ragtest/settings.yaml` 已设置为 `embed_text.batch_size=8`。
 - `unstructured` Markdown parser 在当前环境会尝试下载 NLTK 数据，下载地址返回 `HTTP Error 403: Forbidden`。迁移后的 `MarkdownParser` 已增加纯 Markdown 文本兜底解析，优先使用 `unstructured`，失败时按 Markdown 标题段落切分。
 - 当前环境已配置 `RAG_EMBEDDING_PROVIDER=openai` 和百炼 embedding key；如果后续切回 `huggingface`，仍可能受 `HF_ENDPOINT` 和 `BAAI/bge-large-zh-v1.5` 本地缓存影响。
-- 前端静态包可调用新 `/api/langgraph/query`，但 UI 文案和页面内容仍保留旧电商客服/商品展示元素；阶段 8 应清理或替换该静态前端。
+- 旧 Neo4j KG 子图仍保留在 `llm_backend/app/lg_agent/kg_sub_graph`，但已标记为 legacy reference，不应作为第一版合并主线。
 - GraphRAG `standard` index 在阶段 7 小样本上耗时约 1963 秒；后续如频繁重建，应评估减少社区报告生成量、使用 `fast` method 或改为增量更新。
 
 ## 8. 执行原则
@@ -1305,13 +1314,13 @@ curl -sS -N -D /tmp/general.headers -o /tmp/general.sse \
 旧业务污染检查：
 
 - 对 3 个知识库 SSE 输出和 1 个 general SSE 输出重组正文后检查 `订单`、`商品`、`客户`、`供应商`、`购物车`、`电商` 等词，结果均未命中。
-- 注意：前端静态包本身仍保留旧电商页面文案和商品展示元素，但其聊天调用目标已是 `/api/langgraph/query`。该 UI 清理属于阶段 8。
+- 阶段 7 执行时发现前端静态包仍保留旧电商页面文案和商品展示元素；该问题已在阶段 8 通过替换静态前端解决。
 
 阶段 7 结论：
 
 - 验收通过。
 - GraphRAG CLI、Milvus hybrid RAG、融合回答、FastAPI SSE、general chat 和静态前端可访问性均已验证。
-- 后续进入阶段 8：清理旧路径、更新 README、替换旧前端电商文案、整理依赖与 smoke 文档。
+- 后续阶段 8 已完成清理旧路径、更新 README、替换旧前端文案、整理依赖与 smoke 文档。
 
 ### 阶段 8：清理与文档完善
 
@@ -1333,6 +1342,81 @@ curl -sS -N -D /tmp/general.headers -o /tmp/general.sse \
 - `deepseek_agent` 与 `rag_project` 的依赖差异已被记录或解决。
 - 旧电商 KG/Neo4j 模块不会被 active runtime path 调用。
 - smoke test/script 可重复运行。
+
+### 阶段执行记录：阶段 8 清理与文档完善
+
+执行时间：2026-06-18。
+
+修改文件：
+
+- `README.md`
+- `requirements.txt`
+- `llm_backend/main.py`
+- `llm_backend/static/dist/index.html`
+- `llm_backend/static/dist/assets/app.css`
+- `llm_backend/static/dist/assets/app.js`
+- `docs/merge_kg_rag_plan.md`
+
+新增文件：
+
+- `llm_backend/.env.example`
+- `llm_backend/app/smoke/__init__.py`
+- `llm_backend/app/smoke/merged_rag_smoke.py`
+- `llm_backend/app/lg_agent/kg_sub_graph/README.md`
+
+删除文件：
+
+- `llm_backend/static/dist/assets/index-DUEGwLBP.js`
+- `llm_backend/static/dist/assets/index-DUEGwLBP-kb.js`
+- `llm_backend/static/dist/assets/index-CKrby7OI.css`
+
+实现内容：
+
+- README 已重写为当前 Markdown 技术文档知识库应用说明，覆盖环境变量、启动、GraphRAG index、GraphRAG query smoke、Milvus 入库、FastAPI SSE 查询、依赖差异和 legacy 边界。
+- 新增 `.env.example`，列出 DeepSeek、GraphRAG、Milvus、embedding、MySQL、Redis 和 legacy Neo4j 变量，不包含密钥值。
+- 静态前端已替换为无需构建的原生 HTML/CSS/JS 页面，页面文案和示例问题面向 GraphRAG + Milvus Markdown 知识库，并调用 `/api/langgraph/query`。
+- 删除旧 Vite bundle，避免继续携带旧电商客服/商品展示文案。
+- `/chat-rag` 废弃接口不再引用未定义的 `RAGChatService`，改为 HTTP 410 并提示迁移到 `/api/langgraph/query`。
+- 旧 Neo4j KG 目录新增 README，明确 `kg_sub_graph`、text2cypher、predefined Cypher 和 Neo4j workflow 仅为历史参考，不属于第一版 active runtime path。
+- `requirements.txt` 已标记 active Markdown knowledge RAG 依赖和 legacy Neo4j 依赖边界；`deepseek_agent` 运行时不再依赖 `rag_project` 源码导入。
+- 新增本地 quick smoke：`python -m app.smoke.merged_rag_smoke`，用于检查 GraphRAG CLI help、Python compile、静态前端、active runtime legacy 边界和废弃路由隔离。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.smoke.merged_rag_smoke
+```
+
+结果：成功，输出包含：
+
+- `ok - static frontend`
+- `ok - active runtime boundary`
+- `ok - python compile`
+- `ok - GraphRAG CLI help`
+- `merged RAG smoke checks passed`
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+rg "商品|订单|供应商|智能家居|ProductService|/api/products" llm_backend/static/dist
+```
+
+结果：无匹配。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+rg "kg_sub_graph|NorthwindCypherRetriever|create_multi_tool_workflow" \
+  llm_backend/app/lg_agent/lg_builder.py \
+  llm_backend/app/lg_agent/lg_prompts.py \
+  llm_backend/main.py
+```
+
+结果：无匹配。
+
+阶段 8 结论：
+
+- 验收通过。
+- 第一版 GraphRAG CLI + Milvus hybrid RAG 合并计划已完成。
 
 ## 10. 推荐执行顺序
 
@@ -1500,9 +1584,9 @@ Neo4j 变量不是第一版必需项，但当前旧代码和 `.env` 仍包含：
 
 ## 15. 下一步
 
-下一位模型应从阶段 8：清理与文档完善开始。
+第一版合并计划已完成。阶段 0、1、2、3、4、5、6、7、8 已通过各自验收。
 
-阶段 0、1、2、3、4、5、6、7 已通过各自验收。阶段 8 重点是更新 README、隔离或标记旧电商 KG/Neo4j 模块、清理前端旧电商文案、整理依赖和补充可重复运行的 smoke 文档。
+后续建议优先处理生产化增强：GraphRAG index 耗时优化、后台入库任务队列、前端会话体验、Milvus embedding 部署策略、以及是否重新评估 Neo4j 可视化或图数据库能力。
 
 ## 16. 阶段 5 后配置调整：百炼 embedding 优先
 

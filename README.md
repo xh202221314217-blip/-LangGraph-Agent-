@@ -1,257 +1,197 @@
-# AssistGen - 基于大语言模型构建的智能客服系统
+# DeepSeek Agent Markdown Knowledge RAG
 
-一个基于 FastAPI 和 Vue 3 构建的前后端分离的智能客服助手项目，支持多种大语言模型，如DeepSeek V3，Qwen2.5系列，Llama3系列等。涵盖了 Agent、RAG 在智能客服领域的主流应用落地需求场景。 
+基于 FastAPI + LangGraph 的 Markdown 技术文档问答应用。当前第一版知识路径组合了：
 
-## 功能特性
+- GraphRAG CLI，用于图风格的本地/全局文档推理。
+- Milvus 稠密+稀疏混合检索，用于提供源文档分块证据。
+- 兼容 DeepSeek 的聊天模型，用于路由、普通对话和最终的有依据回答。
 
-### 1. 通用问答能力
-- **支持 DeepSeek V3 在线API**
-- **支持 使用 Ollama 接入任意对话模型，如Qwen2.5系列，Llama3系列**
-- **灵活的模配置**
+旧的电商 Neo4j 知识图谱代码仅作为历史参考保留在 `llm_backend/app/lg_agent/kg_sub_graph` 下；它不属于当前活跃的运行路径。
 
-### 2. 深度思考能力
-- **支持 DeepSeek R1 在线API**
-- **支持 使用 Ollama 接入任意 Deepseek r1 模型系列**
-- **灵活的模配置**
+## 当前运行路径
 
+1. 前端将用户问题发送到 `POST /api/langgraph/query`。
+2. `llm_backend/app/lg_agent/lg_builder.py` 对请求进行路由。
+3. 知识库问题调用 `llm_backend/app/lg_agent/knowledge_fusion.py`。
+4. Fusion 并发查询：
+   - `app.graphrag_cli.GraphRAGCLIRetriever`
+   - `app.rag_retrieval.MilvusHybridRetriever`
+5. 最终答案基于融合后的 GraphRAG 文本和 Milvus 文档证据生成。
 
-### 3. ollama 性能测试工具
-- 单请求性能测试
-- 并发性能测试
-- 系统资源监控
-- 自动化测试报告
+本版本不需要 Neo4j、Cypher 生成，以及电商产品/订单/客户流程。
 
-## 快速启动
-
-### 1. 安装依赖
+## 环境搭建
 
 ```bash
-# 创建虚拟环境
+cd /home/aetherlens/projects/deepseek_agent
 python -m venv .venv
-
-# 激活虚拟环境
-# Windows
-.venv\Scripts\activate
-# Linux/Mac
 source .venv/bin/activate
-
-# 安装依赖
 pip install -r requirements.txt
 ```
 
-### 2. 配置环境变量
+根据 `llm_backend/.env.example` 创建 `llm_backend/.env`，并填写本地密钥、数据库设置和 Milvus 设置。
 
-复制 `env.example` 文件到 `llm_backend/.env` 文件中，并根据实际情况修改配置：
+完整知识路径所需的最少服务：
 
-```env
-# LLM 服务配置
-CHAT_SERVICE=OLLAMA  # 或 DEEPSEEK
-REASON_SERVICE=OLLAMA  # 或 DEEPSEEK
+- MySQL，供现有会话/用户服务使用。
+- Milvus，地址为 `MILVUS_URI`，默认 `http://localhost:19530`。
+- Redis，如果启用了语义缓存功能。
+- 用于 DeepSeek 聊天和 DashScope/百炼 embedding 的 OpenAI 兼容 API。
 
-# Ollama 配置
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_CHAT_MODEL=deepseek-coder:6.7b
-OLLAMA_REASON_MODEL=deepseek-coder:6.7b
+## 环境说明
 
-# DeepSeek 配置（如果使用）
-DEEPSEEK_API_KEY=your-api-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-chat
-```
-### 3. 安装Mysql数据库并在 `.env` 文件中配置数据库连接信息
+测试工作区的 GraphRAG 索引/查询使用工作区设置中的 OpenAI 兼容 DashScope/百炼变量：
 
-### 4. 启动服务
+- `GRAPHRAG_API_KEY`
+- `GRAPHRAG_API_BASE`
+- `GRAPHRAG_MODEL_NAME`
+- `GRAPHRAG_EMBEDDING_API_KEY`
+- `GRAPHRAG_EMBEDDING_API_BASE`
+- `GRAPHRAG_EMBEDDING_MODEL_NAME`
 
-```bash
-# 进入后端目录
-cd llm_backend
+Milvus 稠密 embedding 使用：
 
-# 启动服务（默认端口 9000）
-python run.py
+- `RAG_EMBEDDING_PROVIDER=openai`
+- `RAG_OPENAI_EMBEDDING_API_KEY`
+- `RAG_OPENAI_EMBEDDING_BASE_URL`
+- `RAG_OPENAI_EMBEDDING_MODEL=text-embedding-v3`
 
-# 如果需要修改 IP 和端口，编辑 run.py 中的配置：
-uvicorn.run(
-    "main:app",
-    host="0.0.0.0",  # 修改监听地址
-    port=8000,       # 修改端口号
-    access_log=False,
-    log_level="error",
-    reload=True
-)
-```
+仍然支持 `RAG_EMBEDDING_PROVIDER=huggingface`，但需要已缓存配置的模型，或可用的 Hugging Face endpoint。在此环境中，`HF_ENDPOINT=https://hf-mirror.com` 之前加载 `BAAI/bge-large-zh-v1.5` 失败过。
 
-服务启动后可以访问：
-- API 文档：http://localhost:8000/docs
-- 前端界面：http://localhost:8000
-
-## 技术栈
-
-- 后端：
-  - FastAPI
-  - SQLAlchemy
-  - MySQL
-  - Ollama/DeepSeek
-
-- 前端：
-  - Vue 3
-  - Element Plus
-  - TypeScript
-
-## 注意事项
-
-1. 生产环境部署时：
-   - 修改 `.env` 中的 `SECRET_KEY`
-   - 配置正确的 CORS 设置
-   - 使用 HTTPS
-   - 关闭 `reload=True`
-
-2. 开发环境：
-   - 可以启用 `reload=True` 实现热重载
-   - 可以设置 `log_level="debug"` 查看更多日志
-
-## License
-
-MIT 
-
-# 电商商品数据服务
-
-这个项目提供了一个简单的Python服务，用于从Neo4j图数据库中获取电商商品信息，并通过API或Web界面将其展示给前端。
-
-## 数据库结构
-
-项目使用Neo4j图数据库存储电商相关数据，主要包含以下节点和关系：
-
-### 节点 (Nodes)
-
-1. **Product** - 商品
-   - ProductID: 商品ID
-   - ProductName: 商品名称
-   - UnitPrice: 单价
-   - UnitsInStock: 库存数量
-   - UnitsOnOrder: 订购数量
-   - QuantityPerUnit: 单位数量
-   - Discontinued: 是否停产
-
-2. **Category** - 商品类别
-   - CategoryID: 类别ID
-   - CategoryName: 类别名称
-   - Description: 类别描述
-
-3. **Supplier** - 供应商
-   - SupplierID: 供应商ID
-   - CompanyName: 公司名称
-   - ContactName: 联系人姓名
-   - Phone: 联系电话
-
-4. **Customer** - 客户
-   - CustomerID: 客户ID
-   - CompanyName: 公司名称
-   - ContactName: 联系人姓名
-
-5. **Order** - 订单
-   - OrderID: 订单ID
-   - OrderDate: 订单日期
-
-6. **Review** - 评论
-   - ReviewID: 评论ID
-   - ReviewText: 评论内容
-   - Rating: 评分
-   - ReviewDate: 评论日期
-
-### 关系 (Relationships)
-
-1. **BELONGS_TO** - 商品属于类别: (Product)-[:BELONGS_TO]->(Category)
-2. **SUPPLIED_BY** - 商品由供应商提供: (Product)-[:SUPPLIED_BY]->(Supplier)
-3. **CONTAINS** - 订单包含商品: (Order)-[:CONTAINS]->(Product)
-4. **PLACED** - 客户下订单: (Customer)-[:PLACED]->(Order)
-5. **WROTE** - 客户写评论: (Customer)-[:WROTE]->(Review)
-6. **ABOUT** - 评论关于商品: (Review)-[:ABOUT]->(Product)
-
-## 文件说明
-
-项目包含两个主要文件：
-
-1. **product_service.py** - 提供与Neo4j数据库交互的服务类，封装了各种查询商品信息的方法
-2. **frontend_demo.py** - 基于Flask的Web应用，提供Web界面和API端点，使用product_service获取数据
-
-## 安装依赖
+## 启动 FastAPI
 
 ```bash
-pip install neo4j flask
+cd /home/aetherlens/projects/deepseek_agent/llm_backend
+../.venv/bin/python run.py
 ```
 
-## 配置数据库连接
+默认 URL：
 
-默认连接参数:
-- URI: `bolt://localhost:7687`
-- 用户名: `neo4j`
-- 密码: `password`
-- 数据库: `neo4j`
+- 前端：`http://localhost:8000`
+- API 文档：`http://localhost:8000/docs`
+- 健康检查：`http://localhost:8000/health`
 
-可以通过两种方式修改:
+## GraphRAG 工作区索引
 
-1. 在代码中直接修改
-2. 设置环境变量:
-   ```bash
-   export NEO4J_URI=bolt://localhost:7687
-   export NEO4J_USERNAME=neo4j
-   export NEO4J_PASSWORD=your_password
-   export NEO4J_DATABASE=neo4j
-   ```
+小型测试工作区为：
 
-## 使用ProductService
-
-```python
-from product_service import ProductService
-
-# 创建服务实例
-service = ProductService(
-    uri="bolt://localhost:7687",
-    username="neo4j",
-    password="password"
-)
-
-# 使用上下文管理器自动处理连接
-with service:
-    # 获取类别
-    categories = service.get_all_categories()
-    print(f"类别数量: {len(categories)}")
-    
-    # 根据类别获取商品
-    products = service.get_products_by_category("智能音箱")
-    print(f"智能音箱类别下的商品数量: {len(products)}")
-    
-    # 获取商品详情
-    product_details = service.get_product_details(1)
-    print(f"商品详情: {product_details}")
-    
-    # 搜索商品
-    search_results = service.search_products("智能")
-    print(f"搜索结果数量: {len(search_results)}")
+```text
+llm_backend/app/graphrag_workspaces/ragtest
 ```
 
-## 运行Web应用
+为现有工作区输入建立索引：
 
 ```bash
-python frontend_demo.py
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace \
+  --root llm_backend/app/graphrag_workspaces/ragtest \
+  --method standard \
+  --timeout 3600
 ```
 
-访问 http://localhost:5000 查看Web应用。
+索引前将 Markdown 文件复制到工作区：
 
-## API端点
+```bash
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.index_workspace \
+  --root llm_backend/app/graphrag_workspaces/ragtest \
+  --md-dir /home/aetherlens/projects/rag_project/md/md \
+  --limit 5 \
+  --clear-input \
+  --method standard \
+  --timeout 3600
+```
 
-以下是可用的API端点:
+GraphRAG `standard` 索引可能较慢。stage-7 的五文件样本耗时约 1963 秒。
 
-- `GET /api/categories` - 获取所有商品类别
-- `GET /api/products/category/<category_name>` - 获取指定类别下的商品
-- `GET /api/products/<product_id>` - 获取指定商品的详细信息
-- `GET /api/products/search?keyword=<keyword>` - 搜索商品
-- `GET /api/products/featured` - 获取推荐商品
-- `GET /api/products/popular` - 获取热门商品
-- `GET /api/products/<product_id>/reviews` - 获取指定商品的评论
+## GraphRAG 查询冒烟测试
 
-## 注意事项
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --timeout 180
+```
 
-1. 请确保Neo4j数据库已启动并已导入相关电商数据
-2. 若要在生产环境使用，请确保添加适当的认证和安全机制
-3. Web模板(HTML文件)需要自行创建在templates目录下 
+可通过以下变量配置 wrapper：
+
+- `GRAPHRAG_CLI_PATH`
+- `GRAPHRAG_CLI_WORKSPACE_ROOT`
+- `GRAPHRAG_CLI_DEFAULT_METHOD`
+- `GRAPHRAG_CLI_RESPONSE_TYPE`
+- `GRAPHRAG_CLI_TIMEOUT_SECONDS`
+
+## Milvus Markdown 导入
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.rag_ingest.write_milvus \
+  --md-dir llm_backend/app/graphrag_workspaces/ragtest/input \
+  --batch-size 20
+```
+
+常用参数：
+
+- `--drop-existing` 重新创建已配置的 collection。
+- `--limit N` 仅导入前 N 个 Markdown 文件。
+- `--skip-semantic-chunking` 使用 Markdown fallback parser，不进行语义分块。
+
+## FastAPI 知识查询
+
+服务器运行后：
+
+```bash
+curl -N -X POST http://localhost:8000/api/langgraph/query \
+  -F 'query=GAAFET 相比 FinFET 的关键优势是什么？' \
+  -F 'user_id=1'
+```
+
+响应格式为 Server-Sent Events。前端使用同一个 endpoint。
+
+## 可重复冒烟检查
+
+不调用外部 LLM API 的快速本地检查：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.smoke.merged_rag_smoke
+```
+
+该命令验证：
+
+- GraphRAG CLI help 可用，并暴露 `local|global|drift|basic`。
+- 活跃 Python 包可编译。
+- 活跃的 LangGraph prompt/builder 文件不会导入或引用旧 KG 运行路径。
+- 静态前端是 Markdown 知识库客户端。
+- 已废弃的 `/chat-rag` 路由不再调用已移除的 `RAGChatService`。
+
+完整外部检查仍然是上面的三个命令：GraphRAG 查询冒烟测试、Milvus 导入，以及 FastAPI `/api/langgraph/query`。
+
+## 依赖说明
+
+`deepseek_agent` 现在拥有迁移后的 RAG 代码。运行时不再导入 `/home/aetherlens/projects/rag_project` 源模块。
+
+从 RAG 合并中新增的依赖：
+
+- `graphrag==2.1.0`
+- `langchain-experimental>=0.3.4,<0.4.0`
+- `langchain-huggingface>=0.1.2,<1.0.0`
+- `langchain-milvus>=0.1.8,<0.2.0`
+- `pymilvus>=2.5.0,<2.6.0`
+- `unstructured[md]>=0.15.0,<0.16.0`
+
+由于仓库中仍保留历史模块，`langchain_neo4j` 等旧 KG 依赖仍然安装。活跃的 GraphRAG + Milvus 路径不需要它们。
+
+## 旧代码边界
+
+历史 Neo4j/Cypher 模块保留在：
+
+```text
+llm_backend/app/lg_agent/kg_sub_graph
+```
+
+除非项目明确重新开启 Neo4j 支持，否则不要将这些模块接入第一版运行时。活跃的第一版路径是 `GraphRAG CLI + Milvus hybrid RAG`。
+
+## 上传行为
+
+`POST /api/upload` 会保存文件并返回推荐的 CLI 命令。它不会运行 GraphRAG 索引或 Milvus 导入，因为二者都可能是长时间运行的操作。请使用文档中的 CLI 命令完成导入。
