@@ -154,7 +154,7 @@ GraphRAG CLI 输出处理建议：
 
 ## 7. 当前状态
 
-最后更新时间：2026-06-17
+最后更新时间：2026-06-18
 
 已完成：
 
@@ -182,13 +182,25 @@ GraphRAG CLI 输出处理建议：
 - 已确认 `rag_project` 中 Milvus collection 支持 dense 和 sparse 字段，使用 BM25 内置函数生成 sparse 字段，并使用 RRF 风格参数融合检索结果。
 - 已创建本文档：`docs/merge_kg_rag_plan.md`。
 - 已根据最新决策将主线改为 GraphRAG CLI 检索链路，Neo4j loader 已降级为非第一版目标。
+- 已完成阶段 0 基线验证：
+  - `deepseek_agent/.venv` 可用，Python 版本为 3.12.13。
+  - `.venv/bin/graphrag index --help` 可打印帮助信息。
+  - `.venv/bin/graphrag query --help` 可打印帮助信息，并包含 `local|global|drift|basic`。
+  - `rag_project` 的 Milvus 相关源码依赖已安装，但从仓库根目录直接导入存在源码导入路径问题，详见“阶段执行记录”。
+- 已完成阶段 1 GraphRAG 测试工作区与 CLI 查询验证：
+  - 已创建 `llm_backend/app/graphrag_workspaces/ragtest`。
+  - 已复制 5 个 `rag_project` Markdown 技术文档到 workspace `input`。
+  - 已使用百炼 OpenAI-compatible 接口完成 `graphrag index --method standard`。
+  - 已生成 6 个目标 parquet 和 lancedb 向量索引。
+  - 已通过 `graphrag query --method local` 查询验证。
+- 已完成阶段 2 GraphRAG CLI Retriever Wrapper：
+  - 已新增 `llm_backend/app/graphrag_cli` 包。
+  - 已实现环境变量可配置的 CLI wrapper。
+  - 已实现异步 `graphrag query` 调用、stdout/stderr/return code 捕获、timeout 和最小 stdout 清洗。
+  - 已新增可重复运行的 smoke 命令。
 
 未完成：
 
-- 尚未实施任何代码合并。
-- 尚未创建新的 GraphRAG test workspace。
-- 尚未使用 `rag_project` Markdown 跑通新的 GraphRAG index。
-- 尚未实现 GraphRAG CLI retriever wrapper。
 - 尚未将 `rag_project` 的 Milvus 入库/检索代码迁移到 `deepseek_agent`。
 - 尚未重写 router、tool selection、guardrails 等提示词。
 - 尚未进行端到端入库与查询验证。
@@ -197,6 +209,10 @@ GraphRAG CLI 输出处理建议：
 
 - `llm_backend/app/services/indexing_service.py` 中 `_get_config_file()` 引用了未定义的 `self.config_mapping`。在修复或替换前，不要依赖当前 `/api/upload` 的 GraphRAG 入库路径。
 - 原 Neo4j KG 子图仍存在于代码中，但不应作为第一版合并主线。
+- `rag_project/RAG_PROJECT/RAG_PROJECT/documents/milvus_db.py` 使用顶层导入 `from documents...`、`from llm_models...`、`from utils...`。从 `/home/aetherlens/projects/rag_project` 直接执行验收命令时，`RAG_PROJECT/RAG_PROJECT` 未在 `sys.path` 中，会触发 `ModuleNotFoundError: No module named 'documents'`。
+- 给 `PYTHONPATH` 加上 `/home/aetherlens/projects/rag_project/RAG_PROJECT/RAG_PROJECT` 后，导入会继续加载 `BAAI/bge-large-zh-v1.5`。当前环境设置了 `HF_ENDPOINT=https://hf-mirror.com`，该镜像请求失败且本地无模型缓存，最终报错为无法连接镜像并找不到缓存文件。官方 `https://huggingface.co` 在本机可达。
+- DeepSeek API 当前不能支持 GraphRAG index 所需的完整调用链路；GraphRAG index/query workspace 配置应使用百炼 OpenAI-compatible 接口。运行时普通聊天、总结和融合回答可优先使用 DeepSeek。
+- 百炼 `text-embedding-v3` embedding 接口每批 input 不能超过 10；GraphRAG 默认 `embed_text.batch_size=16` 会失败，`ragtest/settings.yaml` 已设置为 `embed_text.batch_size=8`。
 
 ## 8. 执行原则
 
@@ -261,6 +277,167 @@ GraphRAG CLI 输出处理建议：
 - 本文档记录实际执行命令、产物路径、测试问题和查询结果摘要。
 - 如果失败，本文档记录完整错误信息、缺失环境变量或配置项。
 
+### 阶段执行记录：阶段 0 基线验证
+
+执行时间：2026-06-18。
+
+执行命令与结果：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/python --version
+```
+
+结果：成功，版本为 `Python 3.12.13`。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/graphrag index --help
+```
+
+结果：成功，打印 `graphrag index` 帮助信息，包含 `--root`、`--method [standard|fast]`、`--output` 等参数。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/graphrag query --help
+```
+
+结果：成功，打印 `graphrag query` 帮助信息，`--method` 支持 `local|global|drift|basic`，同时支持 `--query`、`--root`、`--data`、`--response-type`、`--streaming`。
+
+```bash
+cd /home/aetherlens/projects/rag_project
+.venv/bin/python -c "from RAG_PROJECT.RAG_PROJECT.documents.milvus_db import MilvusVectorSave"
+```
+
+结果：失败。失败原因是 `milvus_db.py` 内部使用 `from documents.markdown_parser import MarkdownParser` 这类顶层导入，仓库根目录执行时没有把 `/home/aetherlens/projects/rag_project/RAG_PROJECT/RAG_PROJECT` 加入 `sys.path`，报错为 `ModuleNotFoundError: No module named 'documents'`。
+
+验证修复方式：
+
+```bash
+cd /home/aetherlens/projects/rag_project
+PYTHONPATH=/home/aetherlens/projects/rag_project/RAG_PROJECT/RAG_PROJECT \
+  .venv/bin/python -c "from RAG_PROJECT.RAG_PROJECT.documents.milvus_db import MilvusVectorSave"
+```
+
+结果：导入路径问题解决，但导入会继续初始化 `HuggingFaceEmbeddings(model_name="BAAI/bge-large-zh-v1.5", model_kwargs={"device": "cuda"})`。当前 shell 环境存在 `HF_ENDPOINT=https://hf-mirror.com`，该镜像访问返回跳转/元数据异常，且本地没有模型缓存，因此最终失败于模型下载。`curl -I https://huggingface.co/BAAI/bge-large-zh-v1.5/resolve/main/config.json` 可返回 307，说明官方 Hugging Face 端点可达。
+
+阶段 0 结论：
+
+- `deepseek_agent` 的 Python 虚拟环境和 GraphRAG CLI 基线通过。
+- GraphRAG CLI query method 能力满足阶段 1 前置条件。
+- `rag_project` Milvus 相关依赖已在 `.venv` 中存在；当前阻塞点是源码导入路径和 BGE 模型下载/缓存，不是缺少 Milvus Python 包。
+- 阶段 0 未改动应用行为，未修改代码，未创建 workspace，未下载大模型。
+
+阶段 1 前建议：
+
+- GraphRAG 阶段可继续推进，不依赖 `rag_project` 的 Milvus 导入。
+- 后续迁移 Milvus 代码时，应改为包内相对导入或迁移到 `deepseek_agent` 自身包结构，避免依赖手动 `PYTHONPATH`。
+- 若继续复用 `rag_project` 的 embedding 初始化，建议显式配置 `HF_ENDPOINT=https://huggingface.co` 或预先缓存 `BAAI/bge-large-zh-v1.5`，并确认运行环境有可用 CUDA；否则将 `model_kwargs` 调整为可配置，允许 CPU 兜底。
+
+### 阶段执行记录：阶段 1 GraphRAG 测试工作区与 CLI 查询验证
+
+执行时间：2026-06-18。
+
+重要提醒：
+
+- DeepSeek API 不能用于 GraphRAG index 操作。本阶段 GraphRAG workspace 的 chat 和 embedding 均配置为百炼 OpenAI-compatible 接口。
+- workspace `.env` 保存本地密钥值，但仓库通过 `llm_backend/app/graphrag_workspaces/.gitignore` 忽略 `**/.env`，避免误提交；GraphRAG `cache/` 和 `logs/` 也被忽略，避免提交大量中间缓存与运行日志。
+
+测试工作区：
+
+- `llm_backend/app/graphrag_workspaces/ragtest`
+
+测试文档：
+
+- `tech_report_kvtvbuvp.md`
+- `tech_report_hwbh0qqf.md`
+- `tech_report_lnwngbun.md`
+- `tech_report_m7we5422.md`
+- `tech_report_vebl21yh.md`
+
+执行命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+mkdir -p llm_backend/app/graphrag_workspaces/ragtest/input
+cp /home/aetherlens/projects/rag_project/md/md/tech_report_{kvtvbuvp,hwbh0qqf,lnwngbun,m7we5422,vebl21yh}.md \
+  llm_backend/app/graphrag_workspaces/ragtest/input/
+.venv/bin/graphrag init --root llm_backend/app/graphrag_workspaces/ragtest --force
+```
+
+配置调整：
+
+- `settings.yaml` 使用 `api_base=https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- chat model 使用 `qwen-plus`。
+- embedding model 使用 `text-embedding-v3`。
+- 显式设置 `encoding_model: cl100k_base`，避免 GraphRAG/tiktoken 无法识别 `qwen-plus`。
+- `input.file_pattern` 设置为 `.*\\.md$$`，适配 Markdown 输入并转义 Python `Template` 的 `$`。
+- 复制已有中文 GraphRAG prompts 到 `ragtest/prompts`。
+- `embed_text.batch_size` 设置为 `8`，绕开百炼 embedding 每批 input 不能超过 10 的限制。
+- `entity_types` 调整为技术文档相关类型：`technology`、`material`、`process`、`device`、`application`、`metric`、`challenge`、`solution`、`organization`、`product`。
+
+index 命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/graphrag index --root llm_backend/app/graphrag_workspaces/ragtest --method standard
+```
+
+结果：成功，最终输出 `All workflows completed successfully`。
+
+中间失败与修复：
+
+- 第一次失败：`file_pattern: ".*\\.md$"` 中的 `$` 被 GraphRAG 配置加载的 Python `Template` 当成非法占位符。修复为 `.*\\.md$$`。
+- 第二次失败：`qwen-plus` 无法被 tiktoken 自动映射 tokenizer。修复为 chat 和 embedding 模型均显式设置 `encoding_model: cl100k_base`。
+- 第三次失败：百炼 embedding 接口返回 `batch size is invalid, it should not be larger than 10`。修复为在 `embed_text` 段设置 `batch_size: 8`。注意该字段不属于 `models.default_embedding_model`，放在模型段不会生效。
+
+parquet 检查命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/python - <<'PY'
+from pathlib import Path
+import pandas as pd
+root = Path('llm_backend/app/graphrag_workspaces/ragtest/output')
+for name in ['entities','relationships','text_units','documents','communities','community_reports']:
+    path = root / f'{name}.parquet'
+    df = pd.read_parquet(path)
+    print(f'{name}.parquet rows={len(df)} columns={list(df.columns)}')
+PY
+```
+
+检查结果：
+
+- `entities.parquet`: 91 行，字段为 `id`, `human_readable_id`, `title`, `type`, `description`, `text_unit_ids`, `frequency`, `degree`, `x`, `y`。
+- `relationships.parquet`: 94 行，字段为 `id`, `human_readable_id`, `source`, `target`, `description`, `weight`, `combined_degree`, `text_unit_ids`。
+- `text_units.parquet`: 12 行，字段为 `id`, `human_readable_id`, `text`, `n_tokens`, `document_ids`, `entity_ids`, `relationship_ids`, `covariate_ids`。
+- `documents.parquet`: 5 行，字段为 `id`, `human_readable_id`, `title`, `text`, `text_unit_ids`, `creation_date`, `metadata`。
+- `communities.parquet`: 17 行，字段为 `id`, `human_readable_id`, `community`, `level`, `parent`, `children`, `title`, `entity_ids`, `relationship_ids`, `text_unit_ids`, `period`, `size`。
+- `community_reports.parquet`: 17 行，字段为 `id`, `human_readable_id`, `community`, `level`, `parent`, `children`, `title`, `summary`, `full_content`, `rank`, `rating_explanation`, `findings`, `full_content_json`, `period`, `size`。
+
+lancedb 产物：
+
+- `output/lancedb/default-community-full_content.lance`
+- `output/lancedb/default-text_unit-text.lance`
+- `output/lancedb/default-entity-description.lance`
+
+local 查询命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+.venv/bin/graphrag query \
+  --root llm_backend/app/graphrag_workspaces/ragtest \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？"
+```
+
+结果：成功，GraphRAG 返回与测试 Markdown 相关的中文回答。回答摘要：GAAFET 相比 FinFET 的核心优势包括 360 度全周向栅极控制、短沟道效应和 DIBL 抑制更强、静电控制效率提升、纳米片/纳米线沟道带来更高设计自由度，以及在 3nm 及以下节点具备更好的可扩展性和能效。
+
+阶段 1 结论：
+
+- 验收通过。
+- 阶段 2 可以基于 `llm_backend/app/graphrag_workspaces/ragtest` 实现 GraphRAG CLI retriever wrapper。
+
 ### 阶段 2：GraphRAG CLI Retriever Wrapper
 
 目标：
@@ -299,6 +476,106 @@ GraphRAG CLI 输出处理建议：
 - wrapper 有 timeout，避免请求无限挂起。
 - wrapper 不依赖 Neo4j。
 - wrapper 的 smoke 命令记录到本文档。
+
+### 阶段执行记录：阶段 2 GraphRAG CLI Retriever Wrapper
+
+执行时间：2026-06-18。
+
+新增文件：
+
+- `llm_backend/app/graphrag_cli/__init__.py`
+- `llm_backend/app/graphrag_cli/config.py`
+- `llm_backend/app/graphrag_cli/retriever.py`
+- `llm_backend/app/graphrag_cli/smoke.py`
+
+实现内容：
+
+- `GraphRAGCLIConfig` 支持通过环境变量覆盖：
+  - `GRAPHRAG_CLI_PATH`
+  - `GRAPHRAG_CLI_WORKSPACE_ROOT`
+  - `GRAPHRAG_CLI_DEFAULT_METHOD`
+  - `GRAPHRAG_CLI_RESPONSE_TYPE`
+  - `GRAPHRAG_CLI_TIMEOUT_SECONDS`
+- `GraphRAGCLIRetriever.query()` 使用 `asyncio.create_subprocess_exec` 调用 `graphrag query`。
+- 支持 `query`、`method`、`root`、`data`、`response_type`、`timeout_seconds` 参数。
+- 返回 `GraphRAGCLIResult`，包含清洗后的 `text`、原始 `stdout`、`stderr`、`returncode`、耗时和实际命令。
+- 当 CLI 返回非 0 状态时抛出 `GraphRAGCLIError`，错误中包含 return code、method、root 和 CLI 输出摘要。
+- 当执行超过 timeout 时杀掉子进程并抛出 `GraphRAGCLIError`。
+- wrapper 为独立模块，不导入 Neo4j，也不依赖旧 KG 子图。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m compileall -q llm_backend/app/graphrag_cli
+```
+
+结果：成功。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke --help
+```
+
+结果：成功打印 smoke 参数，包括 `--query`、`--method`、`--root`、`--data`、`--response-type`、`--timeout`。
+
+smoke 查询命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m app.graphrag_cli.smoke \
+  --method local \
+  --query "GAAFET 相比 FinFET 的关键优势是什么？" \
+  --timeout 180
+```
+
+结果：成功。返回 `returncode=0`，耗时约 `81.04` 秒。清洗后的正文不包含 `INFO: Vector Store Args` 前置日志，回答摘要为：GAAFET 相比 FinFET 的关键优势包括 360 度全周向栅极控制、静电控制效率提升、短沟道效应抑制更强、纳米片/纳米线沟道带来更高设计自由度、相同功耗下性能提升或相同性能下降低功耗，以及支撑 3nm 及以下先进制程延续。
+
+非 0 状态验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.graphrag_cli import GraphRAGCLIRetriever, GraphRAGCLIError
+try:
+    GraphRAGCLIRetriever().query_sync(
+        "test question",
+        root="/tmp/no-such-graphrag-workspace",
+        timeout_seconds=30,
+    )
+except GraphRAGCLIError as exc:
+    print(str(exc)[:1000])
+else:
+    raise SystemExit("expected GraphRAGCLIError")
+PY
+```
+
+结果：成功捕获错误。错误信息包含 `returncode=2`，并保留 CLI 关于 `--root` 路径不存在的提示。
+
+timeout 验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.graphrag_cli import GraphRAGCLIRetriever, GraphRAGCLIError
+try:
+    GraphRAGCLIRetriever().query_sync(
+        "GAAFET 相比 FinFET 的关键优势是什么？",
+        timeout_seconds=0.001,
+    )
+except GraphRAGCLIError as exc:
+    print(exc)
+else:
+    raise SystemExit("expected timeout")
+PY
+```
+
+结果：成功触发 timeout，wrapper 返回 `GraphRAG CLI query timed out`，并终止子进程。
+
+阶段 2 结论：
+
+- 验收通过。
+- 阶段 3 可以开始迁移 Milvus 传统 RAG 入库与检索代码。
 
 ### 阶段 3：迁移 Milvus 传统 RAG 入库
 
@@ -473,19 +750,82 @@ GraphRAG CLI 输出处理建议：
 
 ## 11. 环境变量清单
 
-待阶段 0 补充。
+阶段 0 已梳理。本文只记录变量名和用途，不记录本地密钥值。
 
-预计至少需要：
+`deepseek_agent` 现有 FastAPI/LangGraph 运行变量，来源为 `llm_backend/.env` 和 `llm_backend/app/core/config.py`：
 
-- GraphRAG indexing 使用的 LLM API key/base URL/model。
-- GraphRAG query 使用的 LLM API key/base URL/model。
-- runtime answering 使用的 LLM API key/base URL/model。
-- GraphRAG embedding 模型/API 配置。
-- Milvus embedding 模型名称、设备、归一化参数。
-- Milvus URI、collection 名。
-- 现有 FastAPI app 需要的 MySQL、Redis、JWT 等配置。
+- `DEEPSEEK_API_KEY`：DeepSeek API key。
+- `DEEPSEEK_BASE_URL`：DeepSeek API base URL。
+- `DEEPSEEK_MODEL`：DeepSeek 文本模型名。
+- `VISION_API_KEY`：视觉模型 API key。
+- `VISION_BASE_URL`：视觉模型 API base URL。
+- `VISION_MODEL`：视觉模型名。
+- `OLLAMA_BASE_URL`：Ollama 服务地址。
+- `OLLAMA_CHAT_MODEL`：Ollama 聊天模型名。
+- `OLLAMA_REASON_MODEL`：Ollama 推理模型名。
+- `OLLAMA_EMBEDDING_MODEL`：Ollama embedding 模型名。
+- `OLLAMA_AGENT_MODEL`：Ollama agent 模型名。
+- `CHAT_SERVICE`：聊天服务选择，当前枚举为 `deepseek` 或 `ollama`。
+- `REASON_SERVICE`：推理服务选择，当前枚举为 `deepseek` 或 `ollama`。
+- `AGENT_SERVICE`：agent 服务选择，当前枚举为 `deepseek` 或 `ollama`。
+- `SERPAPI_KEY`：SerpAPI 搜索 key。
+- `SEARCH_RESULT_COUNT`：搜索结果数量。
+- `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_NAME`：MySQL 连接配置。
+- `REDIS_HOST`、`REDIS_PORT`、`REDIS_DB`、`REDIS_PASSWORD`：Redis 连接配置。
+- `REDIS_CACHE_EXPIRE`：Redis 语义缓存过期时间。
+- `REDIS_CACHE_THRESHOLD`：Redis 语义缓存相似度阈值。
+- `SECRET_KEY`、`ALGORITHM`、`ACCESS_TOKEN_EXPIRE_MINUTES`：JWT 配置。
+- `EMBEDDING_TYPE`、`EMBEDDING_MODEL`、`EMBEDDING_THRESHOLD`：现有 embedding 配置。
 
-Neo4j 环境变量不是第一版必需项。
+`deepseek_agent` 现有 GraphRAG 配置变量：
+
+- `GRAPHRAG_PROJECT_DIR`：当前 GraphRAG 项目目录，现默认指向 `llm_backend/app/graphrag`。
+- `GRAPHRAG_DATA_DIR`：GraphRAG 数据目录名。
+- `GRAPHRAG_QUERY_TYPE`：GraphRAG 查询类型，第一版建议固定 `local`。
+- `GRAPHRAG_RESPONSE_TYPE`：GraphRAG 响应类型。
+- `GRAPHRAG_COMMUNITY_LEVEL`：GraphRAG community level。
+- `GRAPHRAG_DYNAMIC_COMMUNITY`：是否启用动态 community selection。
+
+阶段 1 创建新 GraphRAG workspace 后，还需要根据 workspace 的 `settings.yaml` 梳理 GraphRAG index/query 实际使用的 LLM 和 embedding 变量。若使用 OpenAI-compatible 服务，预计至少需要 API key、base URL、chat model、embedding model；具体变量名以 `graphrag init` 生成的配置为准。
+
+阶段 1 `ragtest` workspace 实际使用变量：
+
+- `GRAPHRAG_API_KEY`：GraphRAG chat API key，当前使用百炼 key。
+- `GRAPHRAG_API_BASE`：GraphRAG chat base URL，当前为百炼 OpenAI-compatible endpoint。
+- `GRAPHRAG_MODEL_NAME`：GraphRAG chat model，当前为 `qwen-plus`。
+- `GRAPHRAG_EMBEDDING_API_KEY`：GraphRAG embedding API key，当前使用百炼 key。
+- `GRAPHRAG_EMBEDDING_API_BASE`：GraphRAG embedding base URL，当前为百炼 OpenAI-compatible endpoint。
+- `GRAPHRAG_EMBEDDING_MODEL_NAME`：GraphRAG embedding model，当前为 `text-embedding-v3`。
+
+注意：DeepSeek API 不用于 GraphRAG index。普通运行时回答、融合总结等非 GraphRAG index 操作可优先使用 DeepSeek。
+
+`rag_project` Milvus/RAG 来源项目变量，来源为 `/home/aetherlens/projects/rag_project/.env` 和 `RAG_PROJECT/RAG_PROJECT/utils/env_utils.py`：
+
+- `MILVUS_URI`：Milvus 服务地址，当前默认值为 `http://localhost:19530`。
+- `COLLECTION_NAME`：Milvus collection 名，当前默认值为 `t_collection01`。
+- `LLM_PROVIDER`：LLM provider，当前代码支持 `deepseek` 和 `openai`。
+- `DEEPSEEK_API_KEY`：DeepSeek API key。
+- `OPENAI_API_KEY`：OpenAI-compatible API key，当前 embedding 代码用于百炼兼容接口。
+- `TAVILY_API_KEY`：Tavily 搜索 key，仅 web search fallback 需要。
+
+Milvus embedding 代码中还有硬编码配置，后续迁移时应改为环境变量或 `deepseek_agent` 配置项：
+
+- `openai_api_base="https://dashscope.aliyuncs.com/compatible-mode/v1"`。
+- `model_name="BAAI/bge-large-zh-v1.5"`。
+- `model_kwargs={"device": "cuda"}`。
+- `encode_kwargs={"normalize_embeddings": True}`。
+- Milvus dense 向量维度当前 schema 写死为 `1024`。
+
+当前 shell 额外影响变量：
+
+- `HF_ENDPOINT=https://hf-mirror.com`：会影响 Hugging Face 模型下载。阶段 0 验证中该镜像导致 `BAAI/bge-large-zh-v1.5` 下载失败；官方 `https://huggingface.co` 可达。
+- `OLLAMA_MODELS=/mnt/d/ollama/models`：影响 Ollama 本地模型目录。
+
+Neo4j 变量不是第一版必需项，但当前旧代码和 `.env` 仍包含：
+
+- `NEO4J_URL`、`NEO4J_USERNAME`、`NEO4J_PASSWORD`、`NEO4J_DATABASE`。
+
+第一版主流程不应依赖这些 Neo4j 变量。
 
 ## 12. 待决策问题
 
