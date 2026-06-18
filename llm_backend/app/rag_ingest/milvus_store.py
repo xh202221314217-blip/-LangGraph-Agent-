@@ -34,10 +34,16 @@ def create_embedding_function(provider: Optional[str] = None):
                 "langchain_openai is required for RAG_EMBEDDING_PROVIDER=openai."
             ) from exc
 
-        api_key = settings.RAG_OPENAI_EMBEDDING_API_KEY or os.getenv("OPENAI_API_KEY")
+        api_key = (
+            settings.RAG_OPENAI_EMBEDDING_API_KEY
+            or settings.EMBEDDING_API_KEY
+            or os.getenv("DASHSCOPE_API_KEY")
+            or os.getenv("OPENAI_API_KEY")
+        )
         if not api_key:
             raise RuntimeError(
-                "RAG_OPENAI_EMBEDDING_API_KEY or OPENAI_API_KEY is required for "
+                "RAG_OPENAI_EMBEDDING_API_KEY, EMBEDDING_API_KEY, DASHSCOPE_API_KEY, "
+                "or OPENAI_API_KEY is required for "
                 "RAG_EMBEDDING_PROVIDER=openai."
             )
         return OpenAIEmbeddings(

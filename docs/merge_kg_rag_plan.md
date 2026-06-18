@@ -210,10 +210,16 @@ GraphRAG CLI 输出处理建议：
   - 已新增 GraphRAG CLI 与 Milvus hybrid RAG 的工具描述。
   - 已从 `llm_backend/app/lg_agent/lg_builder.py` active path 中移除旧 Neo4j/Cypher multi-tool 子图导入与调用。
   - 已将知识库问题路由到第一版 GraphRAG CLI + Milvus hybrid RAG 检索路径占位；真实并行检索与融合回答留到阶段 5 实现。
+- 已完成阶段 5 合并检索节点：
+  - 已新增 `llm_backend/app/lg_agent/knowledge_fusion.py`。
+  - 已实现运行时并发调用 GraphRAG CLI 和 Milvus hybrid RAG。
+  - 已将 `lg_builder.py` 中知识库路径从检索计划占位替换为真实检索、上下文融合和最终回答生成。
+  - 已在 `AgentState` 中新增 `documents` 字段，用于保存融合后的检索上下文。
+  - 已验证 GraphRAG CLI 可返回结果，Milvus retriever 可返回文档块证据，融合上下文同时包含两侧结果。
+  - 单侧失败会降级为另一侧结果，并在融合上下文和日志中记录失败来源。
 
 未完成：
 
-- 尚未实现运行时并行调用 GraphRAG CLI 和 Milvus hybrid RAG 的融合检索节点。
 - 尚未进行端到端入库与查询验证。
 
 已知问题：
@@ -226,6 +232,7 @@ GraphRAG CLI 输出处理建议：
 - 百炼 `text-embedding-v3` embedding 接口每批 input 不能超过 10；GraphRAG 默认 `embed_text.batch_size=16` 会失败，`ragtest/settings.yaml` 已设置为 `embed_text.batch_size=8`。
 - `unstructured` Markdown parser 在当前环境会尝试下载 NLTK 数据，下载地址返回 `HTTP Error 403: Forbidden`。迁移后的 `MarkdownParser` 已增加纯 Markdown 文本兜底解析，优先使用 `unstructured`，失败时按 Markdown 标题段落切分。
 - 当前 `llm_backend/.env` 未配置 `RAG_OPENAI_EMBEDDING_API_KEY` 或 `OPENAI_API_KEY`，因此生产路径如选择 `RAG_EMBEDDING_PROVIDER=openai` 需要补充 key；默认 HuggingFace embedding 仍可能受 `HF_ENDPOINT` 和模型缓存影响。
+- 阶段 5 生产默认 Milvus 检索路径仍会使用 `RAG_EMBEDDING_PROVIDER=huggingface`，当前环境因 `HF_ENDPOINT=https://hf-mirror.com` 且无本地模型缓存，默认 collection 检索会在 embedding 初始化时失败。融合层已能降级到 GraphRAG；生产要启用 Milvus 默认链路，需要缓存 `BAAI/bge-large-zh-v1.5`、修正 `HF_ENDPOINT`，或配置 `RAG_EMBEDDING_PROVIDER=openai` 与有效 embedding key。
 
 ## 8. 执行原则
 
@@ -850,6 +857,121 @@ PY
 - `/api/langgraph/query` 仍能向前端返回 SSE 数据。
 - GraphRAG CLI 或 Milvus 单侧不可用时，系统能降级，并在日志中明确失败来源。
 
+### 阶段执行记录：阶段 5 合并检索节点
+
+执行时间：2026-06-18。
+
+修改文件：
+
+- `llm_backend/app/lg_agent/knowledge_fusion.py`
+- `llm_backend/app/lg_agent/lg_builder.py`
+- `llm_backend/app/lg_agent/lg_states.py`
+- `docs/merge_kg_rag_plan.md`
+
+实现内容：
+
+- 新增 `HybridKnowledgeRetriever`，使用 `asyncio.create_task` + `asyncio.gather(..., return_exceptions=True)` 并发调用：
+  - `GraphRAGCLIRetriever.query()`
+  - `MilvusHybridRetriever.search()`
+- 新增 `KnowledgeFusionResult.to_context()`，把 GraphRAG 回答和 Milvus `Document` 证据格式化为最终 LLM prompt 的 `<context>` 内容。
+- 新增 `MilvusDocumentEvidence`，保留文档块内容和 `source`、`filename`、`title`、`pk` 等来源元数据。
+- `lg_builder.py` 中 `create_research_plan` 不再生成检索计划，而是执行真实检索、构造 `RAGSEARCH_SYSTEM_PROMPT`、调用 DeepSeek 生成最终回答。
+- `AgentState` 新增 `documents` 字段，保存融合上下文，供后续质检或调试使用。
+- GraphRAG 或 Milvus 任一侧失败时，不中断整个知识库回答流程；失败来源会写入日志和融合上下文的“检索错误”段。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m compileall -q \
+  llm_backend/main.py \
+  llm_backend/app/lg_agent \
+  llm_backend/app/graphrag_cli \
+  llm_backend/app/rag_retrieval
+```
+
+结果：成功。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.lg_agent.lg_builder import graph, route_query
+from app.lg_agent.lg_states import AgentState
+print(type(graph).__name__)
+print(route_query(AgentState(messages=[], router={'type': 'graphrag-query', 'logic': 'doc', 'question': 'GAAFET'})))
+PY
+```
+
+结果：成功，输出 `CompiledStateGraph`、`create_research_plan`。说明 active LangGraph 和 `/api/langgraph/query` 使用的 graph 可正常导入，知识库问题仍进入同一 SSE 消费路径。
+
+GraphRAG + 默认 Milvus 降级验证：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend GRAPHRAG_CLI_TIMEOUT_SECONDS=120 .venv/bin/python - <<'PY'
+import asyncio
+from app.lg_agent.knowledge_fusion import HybridKnowledgeRetriever
+
+async def main():
+    result = await HybridKnowledgeRetriever(milvus_content_limit=300).retrieve('GAAFET 相比 FinFET 的关键优势是什么？')
+    print('has_evidence=', result.has_evidence)
+    print('graphrag_chars=', len(result.graphrag_text))
+    print('milvus_docs=', len(result.milvus_documents))
+    print('errors=', len(result.errors))
+
+asyncio.run(main())
+PY
+```
+
+结果：GraphRAG 成功返回约 927 字结果；默认 Milvus 检索失败于 HuggingFace mirror 模型加载；融合层未中断，`has_evidence=True`，`errors=1`，错误来源明确为 `Milvus hybrid RAG 检索失败`。
+
+Milvus retriever 证据验证：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.rag_ingest.milvus_store import MilvusVectorStore, MilvusStoreConfig
+from app.rag_retrieval.milvus_retriever import MilvusHybridRetriever, MilvusRetrieverConfig
+
+class FixedEmbeddings:
+    def embed_query(self, text):
+        return [0.01] * 1024
+    def embed_documents(self, texts):
+        return [[0.01] * 1024 for _ in texts]
+
+store = MilvusVectorStore(
+    config=MilvusStoreConfig(collection_name='codex_stage3_smoke'),
+    embedding_function=FixedEmbeddings(),
+)
+retriever = MilvusHybridRetriever(
+    store=store,
+    config=MilvusRetrieverConfig(top_k=2, score_threshold=0.0, filter_category=''),
+)
+results = retriever.search('蚀刻技术 分类')
+print('results=', len(results))
+PY
+```
+
+结果：成功，`results=2`，返回文档块来源为 `llm_backend/app/graphrag_workspaces/ragtest/input/tech_report_kvtvbuvp.md`。
+
+融合上下文双侧验证：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend GRAPHRAG_CLI_TIMEOUT_SECONDS=120 .venv/bin/python - <<'PY'
+# 使用真实 GraphRAG CLI + 阶段 3 smoke collection 的固定 embedding Milvus retriever。
+# 查询：蚀刻技术有哪些分类？
+PY
+```
+
+结果：成功，`has_evidence=True`、`graphrag_chars=1109`、`milvus_docs=2`、`errors=[]`，融合上下文同时包含 `## GraphRAG CLI 结果` 和 `## Milvus hybrid RAG 文档块证据`。
+
+阶段 5 结论：
+
+- 验收通过。
+- 运行时知识库路径已具备 GraphRAG CLI + Milvus hybrid RAG 并发检索、上下文融合、LLM  grounded answer 生成和单侧失败降级能力。
+- 生产默认 Milvus 链路仍需补齐 embedding 环境：缓存 HuggingFace 模型、修正 `HF_ENDPOINT`，或配置 OpenAI-compatible embedding key。
+
 ### 阶段 6：入库接口或命令
 
 目标：
@@ -1089,3 +1211,27 @@ Neo4j 变量不是第一版必需项，但当前旧代码和 `.env` 仍包含：
 下一位模型应从阶段 4：重写提示词与路由开始。
 
 阶段 0、1、2、3 已通过各自验收。不要启动阶段 5，除非阶段 4 已完成并记录路由/prompt 验收结果。
+
+## 16. 阶段 5 后配置调整：百炼 embedding 优先
+
+执行日期：2026-06-18。
+
+阶段 5 完成后，embedding 默认链路统一调整为百炼 OpenAI-compatible 接口：
+
+- `EMBEDDING_TYPE=openai`。
+- `EMBEDDING_MODEL=text-embedding-v3`。
+- `EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`。
+- `EMBEDDING_BATCH_SIZE=8`，继续规避百炼每批 input 不能超过 10 的限制。
+- `RAG_EMBEDDING_PROVIDER=openai`。
+- `RAG_OPENAI_EMBEDDING_MODEL=text-embedding-v3`。
+- `GRAPHRAG_EMBEDDING_MODEL_NAME=text-embedding-v3`。
+
+代码层同步调整：
+
+- Redis semantic cache 默认使用 OpenAI-compatible embedding；Ollama 仅在显式配置 `EMBEDDING_TYPE=ollama` 时使用。
+- 预定义 Cypher query matcher 默认使用 OpenAI-compatible embedding；Ollama 仅作为显式 fallback。
+- 旧 PDF/FAISS `EmbeddingService` 从 `paraphrase-multilingual-MiniLM-L12-v2` 切到 `text-embedding-v3`，向量维度跟 `MILVUS_DENSE_DIMENSION=1024` 保持一致。已有 384 维 FAISS 索引需要重建。
+- Milvus dense embedding 默认使用 `langchain_openai.OpenAIEmbeddings` + 百炼 endpoint。
+- GraphRAG 主 workspace 和 `ragtest` workspace 均通过 `GRAPHRAG_EMBEDDING_*` 变量使用百炼 embedding。
+
+Ollama 不再作为默认优先级。当前保留 `OLLAMA_*` 变量只用于显式选择 Ollama 或本地 fallback。

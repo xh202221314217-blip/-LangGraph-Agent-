@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     OLLAMA_AGENT_MODEL: str
     # Service selection
     CHAT_SERVICE: ServiceType = ServiceType.DEEPSEEK
-    REASON_SERVICE: ServiceType = ServiceType.OLLAMA
+    REASON_SERVICE: ServiceType = ServiceType.DEEPSEEK
     AGENT_SERVICE: ServiceType = ServiceType.DEEPSEEK
     
     # Search settings
@@ -62,10 +62,15 @@ class Settings(BaseSettings):
     REDIS_CACHE_EXPIRE: int = 3600
     REDIS_CACHE_THRESHOLD: float = 0.8
     
-    # Embedding settings 
-    EMBEDDING_TYPE: str = "ollama"  # ollama 或 sentence_transformer
-    EMBEDDING_MODEL: str = "bge-m3"  # ollama embedding模型
+    # Embedding settings
+    EMBEDDING_TYPE: str = "openai"  # openai 或 ollama
+    EMBEDDING_MODEL: str = "text-embedding-v3"
+    EMBEDDING_API_KEY: str = ""
+    EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    EMBEDDING_BATCH_SIZE: int = 8
     EMBEDDING_THRESHOLD: float = 0.90  # 语义相似度阈值
+    OPENAI_API_KEY: str = ""
+    DASHSCOPE_API_KEY: str = ""
 
     # Milvus hybrid RAG settings
     MILVUS_URI: str = "http://localhost:19530"
@@ -79,9 +84,7 @@ class Settings(BaseSettings):
     MILVUS_FILTER_CATEGORY: str = "content"
 
     # Embedding settings for Milvus dense vectors.
-    # Keep this separate from the app-wide EMBEDDING_* settings so the
-    # legacy chat/cache embedding path is not changed by the migration.
-    RAG_EMBEDDING_PROVIDER: str = "huggingface"  # huggingface 或 openai
+    RAG_EMBEDDING_PROVIDER: str = "openai"  # openai 或 huggingface
     RAG_EMBEDDING_MODEL: str = "BAAI/bge-large-zh-v1.5"
     RAG_EMBEDDING_DEVICE: str = "cpu"
     RAG_EMBEDDING_NORMALIZE: bool = True
@@ -96,6 +99,12 @@ class Settings(BaseSettings):
     GRAPHRAG_RESPONSE_TYPE: str = "text"                    # 响应类型
     GRAPHRAG_COMMUNITY_LEVEL: int = 3                       # 社区级别
     GRAPHRAG_DYNAMIC_COMMUNITY: bool = False                # 是否动态选择社区
+    GRAPHRAG_API_KEY: str = ""
+    GRAPHRAG_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    GRAPHRAG_MODEL_NAME: str = "qwen-plus"
+    GRAPHRAG_EMBEDDING_API_KEY: str = ""
+    GRAPHRAG_EMBEDDING_API_BASE: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    GRAPHRAG_EMBEDDING_MODEL_NAME: str = "text-embedding-v3"
     
     @property
     def DATABASE_URL(self) -> str:          #根据 .env 中读取到的基础配置，拼接出数据库、Redis、Neo4j 可以直接使用的连接地址。

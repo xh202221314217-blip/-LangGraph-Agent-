@@ -1,5 +1,4 @@
 from typing import Dict, List, Optional
-from sentence_transformers import SentenceTransformer
 import numpy as np
 import faiss
 import json
@@ -8,18 +7,46 @@ import os
 import hashlib
 import time
 import PyPDF2
+import aiohttp
+
+from app.core.config import settings
 
 class EmbeddingService:
     def __init__(self):
-        # 使用多语言模型以支持中文
-        self.model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2')
+        self.model = settings.EMBEDDING_MODEL
+        self.api_key = (
+            settings.EMBEDDING_API_KEY
+            or settings.RAG_OPENAI_EMBEDDING_API_KEY
+            or settings.VISION_API_KEY
+        )
+        self.base_url = settings.EMBEDDING_BASE_URL.rstrip("/")
+        self.batch_size = max(1, settings.EMBEDDING_BATCH_SIZE)
         self.index_dir = Path("indexes")
         self.index_dir.mkdir(exist_ok=True)
         
         # 初始化空索引和文档存储
-        self.dimension = 384  # 修改为与模型输出维度一致
+        self.dimension = settings.MILVUS_DENSE_DIMENSION
         self.current_index = None
         self.current_documents = {}
+
+    async def _embed_texts(self, texts: List[str]) -> np.ndarray:
+        """使用百炼 OpenAI-compatible embedding API 生成向量。"""
+        if not self.api_key:
+            raise ValueError("EMBEDDING_API_KEY is required for embedding generation")
+
+        vectors: List[List[float]] = []
+        async with aiohttp.ClientSession() as session:
+            for start in range(0, len(texts), self.batch_size):
+                batch = texts[start:start + self.batch_size]
+                async with session.post(
+                    f"{self.base_url}/embeddings",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={"model": self.model, "input": batch},
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    vectors.extend(item["embedding"] for item in result["data"])
+        return np.array(vectors, dtype="float32")
     
     def _generate_safe_id(self, metadata: dict) -> str:
         """生成安全的文件ID"""
@@ -52,9 +79,7 @@ class EmbeddingService:
             # 创建索引
             index = self._create_index()
             
-            # 使用 SentenceTransformer 生成向量
-            vectors = self.model.encode(text_chunks)
-            vectors = vectors.astype('float32')  # 确保类型正确
+            vectors = await self._embed_texts(text_chunks)
             
             # 添加向量到索引
             index.add(vectors)
@@ -151,9 +176,7 @@ class EmbeddingService:
             if not self.current_index:
                 raise Exception("未加载索引")
             
-            # 生成查询向量
-            query_vector = self.model.encode([query], convert_to_tensor=False)
-            query_vector = query_vector.astype('float32')
+            query_vector = await self._embed_texts([query])
             
             # 搜索最相似的向量
             distances, indices = self.current_index.search(query_vector, top_k)

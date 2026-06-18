@@ -4,7 +4,7 @@ from app.lg_agent.lg_prompts import (
     GENERAL_QUERY_SYSTEM_PROMPT,
     GET_IMAGE_SYSTEM_PROMPT,
     CHECK_HALLUCINATIONS,
-    KNOWLEDGE_TOOL_DESCRIPTIONS,
+    RAGSEARCH_SYSTEM_PROMPT,
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_deepseek import ChatDeepSeek
@@ -15,6 +15,7 @@ from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import START, StateGraph
 from app.lg_agent.lg_states import AgentState, InputState, Router, GradeHallucinations
+from app.lg_agent.knowledge_fusion import HybridKnowledgeRetriever
 from langchain_core.messages import AIMessage
 import base64
 import aiohttp
@@ -285,34 +286,49 @@ async def create_file_query(
 
 async def create_research_plan(
     state: AgentState, *, config: RunnableConfig
-) -> Dict[str, List[str] | str]:
-    """Route Markdown knowledge-base questions into the first-version retrieval path.
+) -> Dict[str, List[BaseMessage] | List[str] | str]:
+    """Retrieve from GraphRAG CLI and Milvus hybrid RAG, then generate a grounded answer.
 
     Args:
         state (AgentState): 当前代理状态，包括对话历史。
-        config (RunnableConfig): 用于配置计划生成的模型。
+        config (RunnableConfig): 用于配置回答生成的模型。
 
     Returns:
-        Dict[str, List[str] | str]: 包含'steps'键的字典，其中包含研究步骤列表。
+        Dict[str, List[BaseMessage] | List[str] | str]: 更新消息、检索上下文和执行步骤。
     """
     logger.info("------route to markdown knowledge base retrieval path------")
 
-    model = create_deepseek_model(tags=["research_plan"])
-    system_prompt = f"""\
-你是 Markdown 技术知识库的检索规划节点。
+    question = _get_current_question(state)
+    retriever = HybridKnowledgeRetriever()
+    fusion_result = await retriever.retrieve(question)
+    context = fusion_result.to_context()
 
-当前阶段已经完成路由和工具切换，第一版知识库路径只允许使用以下工具：
+    if not fusion_result.has_evidence:
+        logger.warning(f"Knowledge retrieval returned no evidence for question: {question}")
 
-{KNOWLEDGE_TOOL_DESCRIPTIONS}
-
-请根据用户问题输出一个简短的检索计划，说明应使用 GraphRAG CLI、Milvus hybrid RAG，或二者都使用。
-不要生成图数据库查询语句，不要引用旧图数据库 schema 或旧业务路径。
-阶段 5 会把该计划替换为真实的并行检索和融合回答。
-"""
-
+    model = create_deepseek_model(tags=["knowledge_fusion"])
+    system_prompt = RAGSEARCH_SYSTEM_PROMPT.format(context=context)
     messages = [{"role": "system", "content": system_prompt}] + state.messages
     response = await model.ainvoke(messages)
-    return {"messages": [response]}
+    return {
+        "messages": [response],
+        "documents": context,
+        "question": question,
+        "answer": getattr(response, "content", ""),
+        "steps": ["graphrag_cli_query", "milvus_hybrid_search", "fusion_answer"],
+    }
+
+
+def _get_current_question(state: AgentState) -> str:
+    router_question = state.router.get("question") if state.router else None
+    if router_question:
+        return router_question.strip()
+
+    for message in reversed(state.messages):
+        content = getattr(message, "content", "")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+    return state.question.strip()
 
 async def check_hallucinations(
     state: AgentState, *, config: RunnableConfig

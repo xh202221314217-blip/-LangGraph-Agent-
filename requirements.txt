@@ -28,6 +28,7 @@ langgraph==0.3.25
 langchain-deepseek==0.1.3
 langchain-ollama==0.3.0
 langchain_neo4j==0.4.0
+langchain-openai>=0.3.0,<0.4.0
 matplotlib==3.10.1
 seaborn==0.13.2
 langchain_community==0.3.21

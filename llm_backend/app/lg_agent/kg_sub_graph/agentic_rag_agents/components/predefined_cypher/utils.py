@@ -28,23 +28,38 @@ class VectorQueryMatcher:
         self.query_descriptions = query_descriptions
         self.similarity_threshold = similarity_threshold
         
-        # 使用环境变量获取Ollama的基础URL和模型名称
+        self.embedding_type = settings.EMBEDDING_TYPE.lower()
         self.ollama_base_url = settings.OLLAMA_BASE_URL.rstrip('/')
         self.ollama_embedding_model = settings.OLLAMA_EMBEDDING_MODEL
         self.ollama_api_url = f"{self.ollama_base_url}/api/embed"
+        self.openai_embedding_model = settings.EMBEDDING_MODEL
+        self.openai_embedding_url = f"{settings.EMBEDDING_BASE_URL.rstrip('/')}/embeddings"
+        self.openai_embedding_api_key = (
+            settings.EMBEDDING_API_KEY
+            or settings.RAG_OPENAI_EMBEDDING_API_KEY
+            or settings.VISION_API_KEY
+        )
         
-        print(f"使用Ollama模型: {self.ollama_embedding_model}, 地址: {self.ollama_base_url}")
+        print(f"使用Embedding服务: {self.embedding_type}, 模型: {self._active_model_name()}")
         
         # 预计算查询向量
         self.query_vectors = self._compute_query_vectors()
     
+    def _active_model_name(self) -> str:
+        if self.embedding_type == "ollama":
+            return self.ollama_embedding_model
+        return self.openai_embedding_model
+
     def _embed_texts(self, texts: List[str]) -> List[List[float]]:
-        """使用Ollama的embedding API将文本转换为向量"""
-        payload = {
-            "model": self.ollama_embedding_model,
-            "input": texts
-        }
-        
+        """将文本转换为向量，默认使用 OpenAI-compatible embedding API。"""
+        if self.embedding_type == "ollama":
+            return self._embed_texts_with_ollama(texts)
+        if self.embedding_type == "openai":
+            return self._embed_texts_with_openai(texts)
+        raise ValueError(f"Unsupported EMBEDDING_TYPE: {settings.EMBEDDING_TYPE}")
+
+    def _embed_texts_with_ollama(self, texts: List[str]) -> List[List[float]]:
+        payload = {"model": self.ollama_embedding_model, "input": texts}
         try:
             response = requests.post(self.ollama_api_url, json=payload)
             response.raise_for_status()
@@ -54,6 +69,28 @@ class VectorQueryMatcher:
             print(f"生成embedding时出错: {str(e)}")
             # 如果调用失败，返回空向量作为后备
             return [[0.0] * 1024] * len(texts)  # 假设向量维度为1024
+
+    def _embed_texts_with_openai(self, texts: List[str]) -> List[List[float]]:
+        if not self.openai_embedding_api_key:
+            raise ValueError("EMBEDDING_API_KEY is required for EMBEDDING_TYPE=openai")
+
+        vectors: List[List[float]] = []
+        batch_size = max(1, settings.EMBEDDING_BATCH_SIZE)
+        try:
+            for start in range(0, len(texts), batch_size):
+                batch = texts[start:start + batch_size]
+                response = requests.post(
+                    self.openai_embedding_url,
+                    headers={"Authorization": f"Bearer {self.openai_embedding_api_key}"},
+                    json={"model": self.openai_embedding_model, "input": batch},
+                )
+                response.raise_for_status()
+                result = response.json()
+                vectors.extend(item["embedding"] for item in result["data"])
+            return vectors
+        except Exception as e:
+            print(f"生成embedding时出错: {str(e)}")
+            return [[0.0] * 1024] * len(texts)
     
     def _compute_query_vectors(self) -> Dict[str, np.ndarray]:
         """预计算所有预定义查询的向量表示"""

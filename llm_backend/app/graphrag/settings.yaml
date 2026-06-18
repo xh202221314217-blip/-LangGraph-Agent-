@@ -27,15 +27,15 @@ models:
     requests_per_minute: 0            # set to 0 to disable rate limiting
   default_embedding_model:
     type: openai_embedding # or azure_openai_embedding
-    api_base: https://ai.devtool.tech/proxy/v1
+    api_base: ${GRAPHRAG_EMBEDDING_API_BASE}
     # api_base: http://192.168.110.131:11434/v1
     # api_version: 2024-05-01-preview
     auth_type: api_key # or azure_managed_identity
-    api_key: 
+    api_key: ${GRAPHRAG_EMBEDDING_API_KEY}
     # api_key: qwen
     # audience: "https://cognitiveservices.azure.com/.default"
     # organization: <organization_id>
-    model: text-embedding-3-small
+    model: ${GRAPHRAG_EMBEDDING_MODEL_NAME}
     # model: bge-m3
     # deployment_name: <azure_model_deployment_name>
     encoding_model: cl100k_base # automatically set by tiktoken if left undefined
@@ -57,6 +57,7 @@ vector_store:
 embed_text:
   model_id: default_embedding_model
   vector_store_id: default_vector_store
+  batch_size: 8
 
 ## Input settings ###
 # input:

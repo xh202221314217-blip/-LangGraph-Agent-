@@ -26,7 +26,12 @@ class RedisSemanticCache:
         cleanup_interval: int = 3600  # 清理间隔(秒)
     ):
         self.redis = redis.from_url(redis_url or settings.REDIS_URL)
-        self.model_name = model_name or settings.OLLAMA_EMBEDDING_MODEL
+        self.embedding_type = settings.EMBEDDING_TYPE.lower()
+        self.model_name = model_name or (
+            settings.OLLAMA_EMBEDDING_MODEL
+            if self.embedding_type == "ollama"
+            else settings.EMBEDDING_MODEL
+        )
         self.score_threshold = score_threshold or settings.REDIS_CACHE_THRESHOLD
         self.prefix = f"{prefix}:{user_id}" if user_id else prefix
         self.max_cache_size = max_cache_size
@@ -53,11 +58,42 @@ class RedisSemanticCache:
             logger.error(f"Error getting Ollama embedding: {str(e)}", exc_info=True)
             raise
 
+    async def _get_openai_embedding(self, text: str) -> List[float]:
+        """使用 OpenAI-compatible embedding API 生成文本向量。"""
+        api_key = (
+            settings.EMBEDDING_API_KEY
+            or settings.RAG_OPENAI_EMBEDDING_API_KEY
+            or settings.VISION_API_KEY
+        )
+        if not api_key:
+            raise ValueError("EMBEDDING_API_KEY is required for EMBEDDING_TYPE=openai")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{settings.EMBEDDING_BASE_URL.rstrip('/')}/embeddings",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={
+                        "model": self.model_name,
+                        "input": text,
+                    },
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    return result["data"][0]["embedding"]
+        except Exception as e:
+            logger.error(f"Error getting OpenAI-compatible embedding: {str(e)}", exc_info=True)
+            raise
+
     async def _get_embedding(self, text: str) -> List[float]:
         """获取文本向量"""
         try:
-            # 直接使用 ollama 的 embedding 接口
-            embedding = await self._get_ollama_embedding(text)
+            if self.embedding_type == "ollama":
+                embedding = await self._get_ollama_embedding(text)
+            elif self.embedding_type == "openai":
+                embedding = await self._get_openai_embedding(text)
+            else:
+                raise ValueError(f"Unsupported EMBEDDING_TYPE: {settings.EMBEDDING_TYPE}")
             if not embedding:
                 raise ValueError("Failed to get embedding")
             return embedding
