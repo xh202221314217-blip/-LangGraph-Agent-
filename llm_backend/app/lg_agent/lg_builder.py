@@ -1,53 +1,24 @@
-from app.lg_agent.lg_states import AgentState, Router
 from app.lg_agent.lg_prompts import (
     ROUTER_SYSTEM_PROMPT,
     GET_ADDITIONAL_SYSTEM_PROMPT,
     GENERAL_QUERY_SYSTEM_PROMPT,
     GET_IMAGE_SYSTEM_PROMPT,
-    GUARDRAILS_SYSTEM_PROMPT,
-    RAGSEARCH_SYSTEM_PROMPT,
     CHECK_HALLUCINATIONS,
-    GENERATE_QUERIES_SYSTEM_PROMPT
+    KNOWLEDGE_TOOL_DESCRIPTIONS,
 )
 from langchain_core.runnables import RunnableConfig
 from langchain_deepseek import ChatDeepSeek
 from app.core.config import settings
 from app.core.logger import get_logger
-from typing import cast, Literal, TypedDict, List, Dict, Any
+from typing import cast, Literal, List, Dict, Any
 from langchain_core.messages import BaseMessage
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, START, StateGraph
+from langgraph.graph import START, StateGraph
 from app.lg_agent.lg_states import AgentState, InputState, Router, GradeHallucinations
-from app.lg_agent.kg_sub_graph.agentic_rag_agents.retrievers.cypher_examples.northwind_retriever import NorthwindCypherRetriever
-from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.planner.node import create_planner_node
-from app.lg_agent.kg_sub_graph.agentic_rag_agents.workflows.multi_agent.multi_tool import create_multi_tool_workflow
-from app.lg_agent.kg_sub_graph.kg_neo4j_conn import get_neo4j_graph
-from pydantic import BaseModel
-from typing import Dict, List
 from langchain_core.messages import AIMessage
-from langchain_core.runnables.base import Runnable
-from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.utils.utils import retrieve_and_parse_schema_from_graph_for_prompts
-from langchain_core.prompts import ChatPromptTemplate
 import base64
-import os
 import aiohttp
-import asyncio
-import json
-import time
 from pathlib import Path
-
-
-from typing import Literal
-from pydantic import BaseModel, Field
-
-
-class AdditionalGuardrailsOutput(BaseModel):
-    """
-    格式化输出，用于判断用户的问题是否与图谱内容相关
-    """
-    decision: Literal["end", "continue"] = Field(
-        description="Decision on whether the question is related to the graph contents."
-    )
 
 
 # 构建日志记录器
@@ -169,76 +140,12 @@ async def get_additional_info(
     
     model = create_deepseek_model(tags=["additional_info"])
 
-    # 如果用户的问题是电商相关，但与自己的业务无关，则需要返回"无关问题"
-
-    # 首先连接 Neo4j 图数据库
-    neo4j_graph = None
-    try:
-        neo4j_graph = get_neo4j_graph()
-        logger.info("success to get Neo4j graph database connection")
-    except Exception as e:
-        logger.error(f"failed to get Neo4j graph database connection: {e}")
-
-    # 定义电商经营范围
-    scope_description = """
-    个人电商经营范围：智能家居产品，包括但不限于：
-    - 智能照明（灯泡、灯带、开关）
-    - 智能安防（摄像头、门锁、传感器）
-    - 智能控制（温控器、遥控器、集线器）
-    - 智能音箱（语音助手、音响）
-    - 智能厨电（电饭煲、冰箱、洗碗机）
-    - 智能清洁（扫地机器人、洗衣机）
-    
-    不包含：服装、鞋类、体育用品、化妆品、食品等非智能家居产品。
-    """
-
-    scope_context = (  #这个括号的作用是让三元表达式可以多行写
-        f"参考此范围描述来决策:\n{scope_description}"
-        if scope_description is not None
-        else ""
+    system_prompt = GET_ADDITIONAL_SYSTEM_PROMPT.format(
+        logic=state.router["logic"]
     )
-
-    # 动态从 Neo4j 图表中获取图表结构
-    graph_context = (
-        f"\n参考图表结构来回答:\n{retrieve_and_parse_schema_from_graph_for_prompts(neo4j_graph)}"
-        if neo4j_graph is not None
-        else ""
-    )
-
-    message = scope_context + graph_context + "\nQuestion: {question}"
-
-    # 拼接提示模版
-    full_system_prompt = ChatPromptTemplate.from_messages(
-        [
-            (
-                "system",
-                GUARDRAILS_SYSTEM_PROMPT,
-            ),
-            (
-                "human",
-                (message),
-            ),
-        ]
-    )
-
-    # 构建格式化输出的 Chain， 如果匹配，返回 continue，否则返回 end
-    guardrails_chain = full_system_prompt | model.with_structured_output(AdditionalGuardrailsOutput)
-    guardrails_output = await guardrails_chain.ainvoke(
-            {"question": state.messages[-1].content if state.messages else ""}
-        )
-
-    # 根据格式化输出的结果，返回不同的响应
-    if guardrails_output.decision == "end":
-        logger.info("-----Fail to pass guardrails check-----")
-        return {"messages": [AIMessage(content="抱歉，我家暂时没有这方面的商品，可以在别家看看哦~")]}
-    else:
-        logger.info("-----Pass guardrails check-----")
-        system_prompt = GET_ADDITIONAL_SYSTEM_PROMPT.format(
-            logic=state.router["logic"]
-        )
-        messages = [{"role": "system", "content": system_prompt}] + state.messages
-        response = await model.ainvoke(messages)
-        return {"messages": [response]}
+    messages = [{"role": "system", "content": system_prompt}] + state.messages
+    response = await model.ainvoke(messages)
+    return {"messages": [response]}
 
 async def create_image_query(
     state: AgentState, *, config: RunnableConfig
@@ -312,9 +219,9 @@ async def create_image_query(
         payload = {
             "model": vision_model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": "你是一个专业的图像分析助手。请详细分析图片中的内容，特别关注产品细节、品牌、型号等信息。"
+                    {
+                        "role": "system",
+                        "content": "你是一个专业的图像分析助手。请详细分析图片中的可见对象、文字、图表和细节。"
                 },
                 {
                     "role": "user",
@@ -345,7 +252,6 @@ async def create_image_query(
                     image_description = result["choices"][0]["message"]["content"] #官方文档中写的内容地址
                     logger.info(f"Successfully processed image and generated description")
                     # 使用图片描述和用户问题生成最终回复
-                    # 从lg_prompts导入电商客服模板
                     
                     # 构建回复请求
                     model = create_deepseek_model(tags=["image_query"])
@@ -380,7 +286,7 @@ async def create_file_query(
 async def create_research_plan(
     state: AgentState, *, config: RunnableConfig
 ) -> Dict[str, List[str] | str]:
-    """通过查询本地知识库回答客户问题，执行任务分解，创建分布查询计划。
+    """Route Markdown knowledge-base questions into the first-version retrieval path.
 
     Args:
         state (AgentState): 当前代理状态，包括对话历史。
@@ -389,66 +295,24 @@ async def create_research_plan(
     Returns:
         Dict[str, List[str] | str]: 包含'steps'键的字典，其中包含研究步骤列表。
     """
-    logger.info("------execute local knowledge base query------")
+    logger.info("------route to markdown knowledge base retrieval path------")
 
     model = create_deepseek_model(tags=["research_plan"])
-    
-    # 初始化必要参数
-    # 1. Neo4j图数据库连接 - 使用配置中的连接信息
-    neo4j_graph = None
-    try:
-        neo4j_graph = get_neo4j_graph()
-        logger.info("success to get Neo4j graph database connection")
-    except Exception as e:
-        logger.error(f"failed to get Neo4j graph database connection: {e}")
-        return {"messages": [AIMessage(content="抱歉，当前无法连接知识库，请稍后再试。")]}
+    system_prompt = f"""\
+你是 Markdown 技术知识库的检索规划节点。
 
-    # 2. 创建自定义检索器实例，根据 Graph Schema 创建 Cypher 示例，用来引导大模型生成正确的Cypher 查询语句
-    cypher_retriever = NorthwindCypherRetriever()
+当前阶段已经完成路由和工具切换，第一版知识库路径只允许使用以下工具：
 
-    # step 3. 定义工具模式列表    
-    from app.lg_agent.kg_sub_graph.kg_tools_list import cypher_query, predefined_cypher, microsoft_graphrag_query
-    tool_schemas: List[type[BaseModel]] = [cypher_query, predefined_cypher, microsoft_graphrag_query]
+{KNOWLEDGE_TOOL_DESCRIPTIONS}
 
-    # 3. 预定义的Cypher查询 - 为电商场景定义有用的查询
-    from app.lg_agent.kg_sub_graph.agentic_rag_agents.components.predefined_cypher.cypher_dict import predefined_cypher_dict
+请根据用户问题输出一个简短的检索计划，说明应使用 GraphRAG CLI、Milvus hybrid RAG，或二者都使用。
+不要生成图数据库查询语句，不要引用旧图数据库 schema 或旧业务路径。
+阶段 5 会把该计划替换为真实的并行检索和融合回答。
+"""
 
-    # 定义电商经营范围
-    scope_description = """
-    个人电商经营范围：智能家居产品，包括但不限于：
-    - 智能照明（灯泡、灯带、开关）
-    - 智能安防（摄像头、门锁、传感器）
-    - 智能控制（温控器、遥控器、集线器）
-    - 智能音箱（语音助手、音响）
-    - 智能厨电（电饭煲、冰箱、洗碗机）
-    - 智能清洁（扫地机器人、洗衣机）
-    
-    不包含：服装、鞋类、体育用品、化妆品、食品等非智能家居产品。
-    """
-
-    # 创建多工具工作流
-    multi_tool_workflow = create_multi_tool_workflow(
-        llm=model,
-        graph=neo4j_graph,
-        tool_schemas=tool_schemas,
-        predefined_cypher_dict=predefined_cypher_dict,
-        cypher_example_retriever=cypher_retriever,
-        scope_description=scope_description,
-        llm_cypher_validation=True,
-    )
-    
-    # return multi_tool_workflow
-    # 准备输入状态
-    last_message = state.messages[-1].content if state.messages else ""
-    input_state = {
-        "question": last_message,
-        "data": [],
-        "history": []
-    }
-    
-    # 执行工作流
-    response = await multi_tool_workflow.ainvoke(input_state)
-    return {"messages": [AIMessage(content=response["answer"])]}
+    messages = [{"role": "system", "content": system_prompt}] + state.messages
+    response = await model.ainvoke(messages)
+    return {"messages": [response]}
 
 async def check_hallucinations(
     state: AgentState, *, config: RunnableConfig

@@ -204,10 +204,16 @@ GraphRAG CLI 输出处理建议：
   - 已新增 Markdown 目录入库 CLI 和 Milvus hybrid retriever。
   - 已通过独立 smoke collection 验证：创建 collection、导入 5 条文档、关键词检索返回 4 条 LangChain `Document`。
   - 迁移后的运行时不依赖 `/home/aetherlens/projects/rag_project` 源码导入。
+- 已完成阶段 4 重写提示词与路由：
+  - 已将 active router prompt 从电商/智能家居 KG 改为 Markdown 技术文档知识库路由。
+  - 已将 general/additional/image/RAG/hallucination prompts 改为文档知识库语境。
+  - 已新增 GraphRAG CLI 与 Milvus hybrid RAG 的工具描述。
+  - 已从 `llm_backend/app/lg_agent/lg_builder.py` active path 中移除旧 Neo4j/Cypher multi-tool 子图导入与调用。
+  - 已将知识库问题路由到第一版 GraphRAG CLI + Milvus hybrid RAG 检索路径占位；真实并行检索与融合回答留到阶段 5 实现。
 
 未完成：
 
-- 尚未重写 router、tool selection、guardrails 等提示词。
+- 尚未实现运行时并行调用 GraphRAG CLI 和 Milvus hybrid RAG 的融合检索节点。
 - 尚未进行端到端入库与查询验证。
 
 已知问题：
@@ -739,6 +745,81 @@ PY
 - 普通闲聊问题仍能路由到 general query。
 - tool selection 能选择 GraphRAG CLI 查询工具，不再引用旧电商标签。
 - 本文档记录至少 3 个测试问题及预期路由结果。
+
+### 阶段执行记录：阶段 4 重写提示词与路由
+
+执行时间：2026-06-18。
+
+修改文件：
+
+- `llm_backend/app/lg_agent/lg_prompts.py`
+- `llm_backend/app/lg_agent/lg_builder.py`
+- `docs/merge_kg_rag_plan.md`
+
+实现内容：
+
+- `ROUTER_SYSTEM_PROMPT` 已改为 Markdown 技术文档知识库路由器。
+- `general-query` 现在表示不需要查询本地 Markdown 知识库的普通问题。
+- `additional-query` 现在用于缺少主题、范围、对象等检索必要信息的问题。
+- `graphrag-query` 现在用于技术概念、材料、工艺、器件、应用、指标、挑战、方案、文档事实查询、文档比较和文档总结等知识库问题。
+- `GET_ADDITIONAL_SYSTEM_PROMPT`、`GET_IMAGE_SYSTEM_PROMPT`、`RAGSEARCH_SYSTEM_PROMPT`、`CHECK_HALLUCINATIONS` 已切换到文档知识库语境。
+- 新增 `KNOWLEDGE_TOOL_DESCRIPTIONS`，描述第一版可用的 GraphRAG CLI 查询与 Milvus hybrid RAG 文档块检索。
+- `lg_builder.py` 不再在 active path 导入或调用旧 Neo4j/Cypher multi-tool workflow、Northwind retriever、predefined Cypher dict 或 graph schema helper。
+- `create_research_plan` 目前作为阶段 4 检索路径占位：知识库问题会进入该节点，并根据用户问题生成 GraphRAG CLI、Milvus hybrid RAG 或二者并用的简短检索计划。阶段 5 会把该占位替换为真实并行检索、上下文融合和最终回答。
+
+验证命令：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python -m compileall -q \
+  llm_backend/app/lg_agent/lg_prompts.py \
+  llm_backend/app/lg_agent/lg_builder.py
+```
+
+结果：成功。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+rg "电商|智能家居|商品|订单|客户|供应商|Cypher|Neo4j|经营范围" \
+  llm_backend/app/lg_agent/lg_prompts.py \
+  llm_backend/app/lg_agent/lg_builder.py
+```
+
+结果：无匹配。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+rg "kg_sub_graph|NorthwindCypherRetriever|create_multi_tool_workflow|get_neo4j_graph|predefined_cypher" \
+  llm_backend/app/lg_agent/lg_builder.py
+```
+
+结果：无匹配。
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python - <<'PY'
+from app.lg_agent.lg_builder import graph, route_query
+from app.lg_agent.lg_states import AgentState
+print(type(graph).__name__)
+print(route_query(AgentState(messages=[], router={"type": "graphrag-query", "logic": "doc question", "question": "GAAFET"})))
+print(route_query(AgentState(messages=[], router={"type": "general-query", "logic": "chat", "question": "hi"})))
+PY
+```
+
+结果：成功，输出 `CompiledStateGraph`、`create_research_plan`、`respond_to_general_query`。
+
+测试问题与预期路由：
+
+- `GAAFET 相比 FinFET 的关键优势是什么？` -> `graphrag-query` -> `create_research_plan`，预期阶段 5 使用 GraphRAG CLI + Milvus hybrid RAG。
+- `请总结这些文档里提到的蚀刻技术分类。` -> `graphrag-query` -> `create_research_plan`，预期阶段 5 使用 GraphRAG CLI + Milvus hybrid RAG。
+- `你好，帮我把这句话翻译成英文。` -> `general-query` -> `respond_to_general_query`。
+- `这个方案有什么优势？` -> `additional-query`，因为缺少明确主题或上下文对象。
+
+阶段 4 结论：
+
+- 验收通过。
+- active prompt 和主流程 builder 不再携带旧电商/智能家居/Neo4j/Cypher 主线。
+- 阶段 5 可以开始实现真实的 GraphRAG CLI + Milvus hybrid RAG 并行检索与融合回答节点。
 
 ### 阶段 5：实现合并检索节点
 
