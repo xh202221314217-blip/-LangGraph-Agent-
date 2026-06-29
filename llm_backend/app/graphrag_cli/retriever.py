@@ -88,13 +88,20 @@ class GraphRAGCLIRetriever:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        '''
+        异步创建一个子进程；
+        不阻塞当前事件循环；
+        把子进程的标准输出 stdout 捕获起来；
+        把子进程的错误输出 stderr 捕获起来；
+        返回一个 Process 对象，后续可以读取输出、等待结束、获取退出码。
+        '''
 
         try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(  #等待子进程执行，执行结果放在stdout_bytes和stderr_bytes中
                 process.communicate(),
                 timeout=selected_timeout,
             )
-        except asyncio.TimeoutError as exc:
+        except asyncio.TimeoutError as exc:  #上面设置了执行时间，如果超时就杀掉进程
             process.kill()
             await process.communicate()
             raise GraphRAGCLIError(

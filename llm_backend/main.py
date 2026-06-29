@@ -92,7 +92,7 @@ async def health_check():
 
 @app.post("/api/chat")
 async def chat_endpoint(request: ChatMessage):
-    """聊天接口"""
+    """聊天接口，只返回普通的服务器响应，不涉及RAG或LangGraph"""
     try:
         logger.info(f"Processing chat request for user {request.user_id} in conversation {request.conversation_id}")
         chat_service = LLMFactory.create_chat_service()

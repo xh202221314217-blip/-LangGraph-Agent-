@@ -15,6 +15,8 @@ from app.rag_retrieval import MilvusHybridRetriever
 
 logger = get_logger(service="knowledge_fusion")
 
+GRAPHRAG_LOG_PREVIEW_CHARS = 2000
+
 
 @dataclass(frozen=True)
 class MilvusDocumentEvidence:
@@ -89,10 +91,10 @@ class HybridKnowledgeRetriever:
         graphrag_task = asyncio.create_task(self._query_graphrag(normalized_question))
         milvus_task = asyncio.create_task(self._query_milvus(normalized_question))
 
-        graphrag_result, milvus_result = await asyncio.gather(
-            graphrag_task,
+        graphrag_result, milvus_result = await asyncio.gather( #该方法等待所有传入的协程完成，并返回一个包含结果的元组。
+            graphrag_task,  #返回值顺序和传入任务顺序一致，所以第一个给 graphrag_result，第二个给 milvus_result
             milvus_task,
-            return_exceptions=True,
+            return_exceptions=True,  #表示某一路失败时不会中断整个检索流程，而是将异常作为结果返回
         )
 
         errors: list[str] = []
@@ -104,12 +106,25 @@ class HybridKnowledgeRetriever:
             errors.append(f"GraphRAG CLI 检索失败：{graphrag_result}")
         else:
             graphrag_text = graphrag_result.strip()
+            if graphrag_text:
+                logger.info(
+                    "GraphRAG retrieval succeeded: "
+                    f"chars={len(graphrag_text)}, "
+                    f"content_preview={_preview_text(graphrag_text)}"
+                )
+            else:
+                logger.info("GraphRAG retrieval succeeded but returned empty content")
 
         if isinstance(milvus_result, Exception):
             logger.warning(f"Milvus hybrid retrieval failed: {milvus_result}")
             errors.append(f"Milvus hybrid RAG 检索失败：{milvus_result}")
         else:
             milvus_documents = self._compact_documents(milvus_result)
+            logger.info(
+                "Milvus hybrid retrieval succeeded: "
+                f"raw_count={len(milvus_result)}, "
+                f"usable_count={len(milvus_documents)}"
+            )
 
         return KnowledgeFusionResult(
             question=normalized_question,
@@ -154,3 +169,10 @@ def _format_source(metadata: dict[str, Any]) -> str:
         if value is not None and value != "":
             parts.append(f"{key}={value}")
     return ", ".join(parts) if parts else "source=metadata"
+
+
+def _preview_text(text: str, limit: int = GRAPHRAG_LOG_PREVIEW_CHARS) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[:limit].rstrip() + "..."

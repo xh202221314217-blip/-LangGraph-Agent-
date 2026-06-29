@@ -13,7 +13,7 @@ def iter_markdown_files(md_dir: str | Path, *, limit: Optional[int] = None) -> I
     files = sorted(Path(md_dir).glob("*.md"))
     if limit is not None:
         files = files[:limit]
-    yield from files
+    yield from files  #把 files 里的路径一个一个“产出”，等价于for file in files:  yield file
 
 
 def ingest_markdown_dir(
