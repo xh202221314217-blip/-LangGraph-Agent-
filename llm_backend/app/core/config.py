@@ -93,6 +93,7 @@ class Settings(BaseSettings):
     RAG_OPENAI_EMBEDDING_MODEL: str = "text-embedding-v3"
     
     # GraphRAG settings
+    USE_GRAPHRAG: bool = True
     GRAPHRAG_PROJECT_DIR: str = "llm_backend/app/graphrag"  # GraphRAG项目目录
     GRAPHRAG_DATA_DIR: str = "data"                         # 数据目录名称
     GRAPHRAG_QUERY_TYPE: str = "local"                      # 查询类型

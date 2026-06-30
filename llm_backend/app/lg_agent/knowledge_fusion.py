@@ -8,8 +8,9 @@ from typing import Any
 
 from langchain_core.documents import Document
 
+from app.core.config import settings
 from app.core.logger import get_logger
-from app.graphrag_cli import GraphRAGCLIError, GraphRAGCLIRetriever
+from app.graphrag_cli import GraphRAGCLIRetriever
 from app.rag_retrieval import MilvusHybridRetriever
 
 
@@ -76,8 +77,12 @@ class HybridKnowledgeRetriever:
         graphrag_retriever: GraphRAGCLIRetriever | None = None,
         milvus_retriever: MilvusHybridRetriever | None = None,
         milvus_content_limit: int = 1600,
+        use_graphrag: bool = settings.USE_GRAPHRAG,
     ) -> None:
-        self.graphrag_retriever = graphrag_retriever or GraphRAGCLIRetriever()
+        self.use_graphrag = use_graphrag
+        self.graphrag_retriever = (
+            graphrag_retriever or GraphRAGCLIRetriever()
+        ) if use_graphrag else None
         self.milvus_retriever = milvus_retriever or MilvusHybridRetriever()
         self.milvus_content_limit = milvus_content_limit
 
@@ -88,32 +93,39 @@ class HybridKnowledgeRetriever:
         if not normalized_question:
             raise ValueError("question must not be empty")
 
-        graphrag_task = asyncio.create_task(self._query_graphrag(normalized_question))
         milvus_task = asyncio.create_task(self._query_milvus(normalized_question))
-
-        graphrag_result, milvus_result = await asyncio.gather( #该方法等待所有传入的协程完成，并返回一个包含结果的元组。
-            graphrag_task,  #返回值顺序和传入任务顺序一致，所以第一个给 graphrag_result，第二个给 milvus_result
-            milvus_task,
-            return_exceptions=True,  #表示某一路失败时不会中断整个检索流程，而是将异常作为结果返回
-        )
+        if self.use_graphrag:
+            graphrag_task = asyncio.create_task(self._query_graphrag(normalized_question))
+            graphrag_result, milvus_result = await asyncio.gather( #该方法等待所有传入的协程完成，并返回一个包含结果的元组。
+                graphrag_task,  #返回值顺序和传入任务顺序一致，所以第一个给 graphrag_result，第二个给 milvus_result
+                milvus_task,
+                return_exceptions=True,  #表示某一路失败时不会中断整个检索流程，而是将异常作为结果返回
+            )
+        else:
+            graphrag_result = ""
+            milvus_result = (await asyncio.gather(
+                milvus_task,
+                return_exceptions=True,
+            ))[0]
 
         errors: list[str] = []
         graphrag_text = ""
         milvus_documents: list[MilvusDocumentEvidence] = []
 
-        if isinstance(graphrag_result, Exception):
-            logger.warning(f"GraphRAG retrieval failed: {graphrag_result}")
-            errors.append(f"GraphRAG CLI 检索失败：{graphrag_result}")
-        else:
-            graphrag_text = graphrag_result.strip()
-            if graphrag_text:
-                logger.info(
-                    "GraphRAG retrieval succeeded: "
-                    f"chars={len(graphrag_text)}, "
-                    f"content_preview={_preview_text(graphrag_text)}"
-                )
+        if self.use_graphrag:
+            if isinstance(graphrag_result, Exception):
+                logger.warning(f"GraphRAG retrieval failed: {graphrag_result}")
+                errors.append(f"GraphRAG CLI 检索失败：{graphrag_result}")
             else:
-                logger.info("GraphRAG retrieval succeeded but returned empty content")
+                graphrag_text = graphrag_result.strip()
+                if graphrag_text:
+                    logger.info(
+                        "GraphRAG retrieval succeeded: "
+                        f"chars={len(graphrag_text)}, "
+                        f"content_preview={_preview_text(graphrag_text)}"
+                    )
+                else:
+                    logger.info("GraphRAG retrieval succeeded but returned empty content")
 
         if isinstance(milvus_result, Exception):
             logger.warning(f"Milvus hybrid retrieval failed: {milvus_result}")
@@ -134,6 +146,8 @@ class HybridKnowledgeRetriever:
         )
 
     async def _query_graphrag(self, question: str) -> str:
+        if self.graphrag_retriever is None:
+            raise RuntimeError("GraphRAG retriever is disabled")
         result = await self.graphrag_retriever.query(question)
         return result.text
 

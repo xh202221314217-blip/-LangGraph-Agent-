@@ -325,12 +325,15 @@ async def create_research_plan(
     system_prompt = RAGSEARCH_SYSTEM_PROMPT.format(context=context)
     messages = [{"role": "system", "content": system_prompt}] + state.messages
     response = await model.ainvoke(messages)
+    steps = ["milvus_hybrid_search", "fusion_answer"]
+    if settings.USE_GRAPHRAG:
+        steps.insert(0, "graphrag_cli_query")
     return {
         "messages": [response],
         "documents": context,
         "question": question,
         "answer": getattr(response, "content", ""),
-        "steps": ["graphrag_cli_query", "milvus_hybrid_search", "fusion_answer"],
+        "steps": steps,
     }
 
 
