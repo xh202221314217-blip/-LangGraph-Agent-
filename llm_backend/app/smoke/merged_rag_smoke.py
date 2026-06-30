@@ -47,7 +47,7 @@ def check_static_frontend() -> None:
         raise SmokeFailure(f"Missing static frontend files: {missing}")
 
     combined = "\n".join(_read(path) for path in expected)
-    required_terms = ["Markdown Knowledge RAG", "/api/langgraph/query", "GraphRAG CLI", "Milvus hybrid"]
+    required_terms = ["Markdown Knowledge RAG", "/api/langgraph/query", "method=\"post\"", "requestSubmit"]
     missing_terms = [term for term in required_terms if term not in combined]
     if missing_terms:
         raise SmokeFailure(f"Static frontend is missing expected terms: {missing_terms}")

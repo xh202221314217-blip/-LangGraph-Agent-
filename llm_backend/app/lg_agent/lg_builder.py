@@ -84,6 +84,10 @@ def route_query(
         logger.info("检测到图片路径，转为图片查询处理")
         return "create_image_query"
 
+    if _type == "general-query" and _looks_like_knowledge_query(_get_current_question(state)):
+        logger.info("Domain query override: routing to markdown knowledge base retrieval path")
+        return "create_research_plan"
+
     if _type == "general-query":
         return "respond_to_general_query"       #这里不更新state任何属性。
     elif _type == "additional-query":
@@ -96,6 +100,17 @@ def route_query(
         return "create_file_query"
     else:
         raise ValueError(f"Unknown router type {_type}")
+
+
+def _looks_like_knowledge_query(question: str) -> bool:
+    terms = (
+        "半导体", "材料", "晶体管", "微型化", "物理极限", "finfet", "gaafet",
+        "mosfet", "cmos", "芯片", "器件", "工艺", "制程", "封装", "刻蚀",
+        "光刻", "沉积", "掺杂", "硅", "碳化硅", "氮化镓",
+    )
+    normalized = question.strip().lower()
+    # ponytail: keyword fallback, replace with corpus-aware routing if domains grow.
+    return any(term in normalized for term in terms)
     
 async def respond_to_general_query(
     state: AgentState, *, config: RunnableConfig
@@ -383,6 +398,20 @@ builder.add_conditional_edges("analyze_and_route_query", route_query)
 
 
 graph = builder.compile(checkpointer=checkpointer)
+
+
+def _demo_route_override() -> None:
+    from langchain_core.messages import HumanMessage
+
+    state = AgentState(
+        messages=[HumanMessage(content="晶体管微型化面临的物理极限")],
+        router=Router(type="general-query", logic="simulated bad route"),
+    )
+    assert route_query(state) == "create_research_plan"
+
+
+if __name__ == "__main__":
+    _demo_route_override()
 
 # from IPython.display import Image, display
 # display(Image(graph.get_graph().draw_mermaid_png()))

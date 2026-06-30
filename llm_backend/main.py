@@ -360,6 +360,7 @@ async def langgraph_query(
             logger.info("Using existing conversation state")
             # 如果有现有会话，使用resume命令继续对话
             async def process_stream():
+                yield ": connected\n\n"
                 async for c, metadata in graph.astream(    #这种情况是处理interrupt中断后续的继续执行
                     Command(resume=query),    #遗留问题：现有会话不一定是因为中断导致的。！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！！
                     stream_mode="messages", 
@@ -391,6 +392,7 @@ async def langgraph_query(
             
             # 流式处理查询
             async def process_stream():
+                yield ": connected\n\n"
                 async for c, metadata in graph.astream(
                     input=input_state, 
                     stream_mode="messages", 

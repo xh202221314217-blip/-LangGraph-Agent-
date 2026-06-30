@@ -8,6 +8,58 @@
 
 旧的电商 Neo4j 知识图谱代码仅作为历史参考保留在 `llm_backend/app/lg_agent/kg_sub_graph` 下；它不属于当前活跃的运行路径。
 
+## 启动项目
+
+需要先准备 `llm_backend/.env`，可从 `llm_backend/.env.example` 复制后填写模型 Key、MySQL、Redis、Milvus 等配置。
+
+需要启动的容器由 `docker-compose.yml` 管理：
+
+```text
+mysql              MySQL，localhost:3307
+redis              Redis，localhost:6379
+milvus-etcd        Milvus 依赖
+milvus-minio       Milvus 依赖，localhost:9000/9001
+milvus-standalone  Milvus，localhost:19530 和 localhost:9091
+```
+
+启动容器：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+docker compose --env-file llm_backend/.env up -d
+```
+
+`--env-file llm_backend/.env` 用来让 Compose 读取 `DB_PORT`、`DB_PASSWORD`、`DB_NAME` 等数据库配置。仓库里的 Neo4j 只给旧知识图谱代码保留，默认不会启动。
+
+首次创建数据库表，或需要清空并重建表时，再运行：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent
+PYTHONPATH=llm_backend .venv/bin/python llm_backend/scripts/init_db.py
+```
+
+`init_db.py` 会先删除再创建表，不需要每次启动都执行。数据库表已经存在时，直接启动服务即可。
+
+普通启动方式：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent/llm_backend
+../.venv/bin/python run.py
+```
+
+已验证也可以用 `uv` 启动：
+
+```bash
+cd /home/aetherlens/projects/deepseek_agent/llm_backend
+uv run --with-requirements ../requirements.txt uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir .
+```
+
+启动后访问：
+
+- 前端：`http://localhost:8000`
+- 健康检查：`http://localhost:8000/health`
+- API 文档：`http://localhost:8000/docs`
+
 ## 当前运行路径
 
 1. 前端将用户问题发送到 `POST /api/langgraph/query`。
