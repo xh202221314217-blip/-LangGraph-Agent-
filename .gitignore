@@ -38,6 +38,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Runtime uploads
+llm_backend/uploads/
+
 # Temporary editor files
 *.swp
 *.swo
